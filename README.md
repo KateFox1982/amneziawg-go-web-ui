@@ -1,7 +1,7 @@
 # AmneziaWG Web UI
 
 A comprehensive web-based management interface for AmneziaWG VPN servers. This service provides an easy-to-use web UI to create, manage, and monitor WireGuard VPN servers with AmneziaWG's advanced obfuscation features.
-All server configuration is done via web interface or via API endpoints. Providing env variables at docker startup is supported but doesn't make much sense: all settings can be overridden via web interface except for NGINX_PORT.
+All server configuration is done via web interface or via API endpoints. Providing env variables at docker startup is supported but doesn't make much sense: all settings can be overridden via web interface except for WEB_UI_PORT.
 
 <img src="screenshot2.png" alt="Web UI screenshot" width="50%"/>
 <img src="screenshot.png" alt="Web UI screenshot" width="50%"/>
@@ -20,7 +20,6 @@ All server configuration is done via web interface or via API endpoints. Providi
 *   **Custom values**: MTU and other connection settings can be customized
 *   **QR code**: Client can be viewed, copied and downloaded via text, file or QR code
 *   **Config view**: Both servers' and clients' configs can be viewed directly from UI
-*   **Auto SSL support**: Automatic SSL cert deployment with certbot
 *   **AWG 1.5 and 2.0 support**: I1-I5 and S3-S4 values can be customized
 *   **Client data**: Clients' traffic, last handshake and IP are displayed and auto-refreshed
 
@@ -28,10 +27,12 @@ All server configuration is done via web interface or via API endpoints. Providi
 
 ### Components
 
-**Flask Backend** (`app.py`)
+**Go/Fiber Backend** (`main.go`, `internal/`)
 
 *   RESTful API for server management
-*   WebSocket support for real-time updates
+*   Serves the web UI (static assets + index page) directly, no reverse proxy needed
+*   Basic auth for the whole app
+*   Socket.IO support for real-time updates
 *   AmneziaWG configuration generation
 *   Client config management
 
@@ -40,18 +41,6 @@ All server configuration is done via web interface or via API endpoints. Providi
 *   Responsive web interface
 *   Real-time status updates
 *   Form validation and error handling
-
-**Nginx** (`config/nginx.conf`)
-
-*   Reverse proxy for Flask application
-*   Static file serving
-*   WebSocket proxy support
-
-**Supervisor** (`config/supervisord.conf`)
-
-*   Process management
-*   Automatic service restart
-*   Log management
 
 ### Directory Structure
 
@@ -79,7 +68,7 @@ Content-Type: application/json
 
 {
   "name": "My VPN Server",
-  "port": 51820,
+  "port": 51834,
   "subnet": "10.0.0.0/24",
   "mtu": 1280,
   "obfuscation": true,
@@ -185,32 +174,27 @@ Official docker image repository: https://hub.docker.com/r/alexishw/amneziawg-we
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `NGINX_PORT` | `80` | External port for web interface |
-| `NGINX_USER` | `admin` | Username for basic auth in the app |
-| `NGINX_PASSWORD` | `changeme` | Password for basic auth in the app |
+| `WEB_UI_PORT` | `80` | Port the app listens on for the web interface |
+| `WEB_UI_USER` | `admin` | Username for basic auth in the app |
+| `WEB_UI_PASSWORD` | `changeme` | Password for basic auth in the app  SHA-256 `printf 'secret' \| openssl dgst -binary -sha256 \| base64` |
 | `AUTO_START_SERVERS` | `true` | Auto-start servers on container startup |
 | `DEFAULT_MTU` | `1280` | Default MTU value for new servers. Effective only for api requests. For UI management set via UI. |
 | `DEFAULT_SUBNET` | `10.0.0.0/24` | Default subnet for new servers. Effective only for api requests. For UI management set via UI. |
-| `DEFAULT_PORT` | `51820` | Default port for new servers. Effective only for api requests. For UI management set via UI. |
+| `DEFAULT_PORT` | `51834` | Default port for new servers. Effective only for api requests. For UI management set via UI. |
 | `DEFAULT_DNS` | `8.8.8.8,1.1.1.1` | Default DNS servers for clients. Effective only for api requests. For UI management set via UI. |
-| `SSL_EMAIL` | `-` | Email used to register Let's encrypt account
-| `SSL_DOMAIN` | `-` | Domain used for SSL cert generation by certbot
-| `IP_LIST` | `-` | A list of IP addresses or IP ranges to allow connections from.
 
 ### Docker Compose Example
 
 ```yaml
 version: '3.8'
 services:
-  amnezia-web-ui:
-    image: alexishw/amneziawg-web-ui:master
+  app:
     build: .
-    container_name: amnezia-web-ui
     ports:
       - "8080:8080/tcp"
-      - "51820:51820/udp"
+      - "51834:51834/udp"
     environment:
-      - NGINX_PORT=8080
+      - WEB_UI_PORT=8080
       - AUTO_START_SERVERS=true
       - DEFAULT_MTU=1280
     volumes:
@@ -242,48 +226,20 @@ docker run -d \
   --sysctl net.ipv4.conf.all.src_valid_mark=1 \
   --device /dev/net/tun \
   --restart unless-stopped \
-  -p 80:80 \
   -p 9090:9090 \
   -p 51821:51821/udp \
-  -e NGINX_PORT=9090 \
-  -e NGINX_PASSWORD=1234
+  -e WEB_UI_PORT=9090 \
+  -e WEB_UI_PASSWORD=1234
   -e AUTO_START_SERVERS=false \
   -e DEFAULT_MTU=1420 \
   -e DEFAULT_SUBNET=10.8.0.0/24 \
   -e DEFAULT_PORT=51821 \
   -e DEFAULT_DNS="8.8.8.8,8.8.4.4" \
-  -e SSL_EMAIL="your@email.com" \
-  -e SSL_DOMAIN="your.domain.com" \
   -v amnezia-data:/etc/amnezia \
-  -v ssl:/etc/letsencrypt \
   alexishw/amneziawg-web-ui:master
 ```
 
-## SSL certificates issue
-
-When `SSL_EMAIL` and `SSL_DOMAIN` are specified, certbot requests certificate for the domain provided at docker container run.
-For this purpose you additionally need to expose `port 80`. It provides access only to the `/.well-known` endpoint, so there is no additional security risk introduced.
-You can't use a single port 80 both for the application and for the SSL deployment: if you wish to use ssl, set the custom port for the app.
-
-You can check if the certificate was issued by checking docker logs at the start or by viewing `/var/log/letsencrypt/letsencrypt.log` inside the container.
-
-Cronjob to renew a certificate is also automatically created that runs every Tuesday.
-
-If you wish to keep the issued certificate during container recreation, you need to mount container folder to a host:
-`/etc/letsencrypt` or` /etc/letsencrypt/live`.
-
-> [!NOTE]
-> If you enable SSL support and want to have healthcheck continue working properly, you need to provide a https healthcheck URL at docker container start:
-> `--health-cmd='curl -f https://localhost:$NGINX_PORT/status || exit 1'`
-
-## Protection by IP address
-
-You can protect your webserver by limiting connections to the it through the list of IP address(es) and IP range(s). To enable it you need to provide env variable `IP_LIST` at docker container run, e.g.
-`-e IP_LIST="100.200.101.201, 50.100.10.0/24"`
-
-> [!NOTE]
-> Take a note that in case you enable SSL for your server, you have to allow Let's Encrypt IP ranges. Here is a known CIDR used by Let's Encrypt, though is may vary country by country:
-`23.178.112.0/24`
+If you need HTTPS, put your own TLS-terminating reverse proxy (nginx, Caddy, Traefik, etc.) in front of the container and forward to `WEB_UI_PORT`.
 
 ## 📊 Obfuscation Parameters
 
@@ -346,19 +302,9 @@ AmneziaWG supports advanced traffic obfuscation to bypass censorship and DPI (De
 
 ### Application logs
 
-`docker exec amnezia-web-ui tail -f /var/log/web-ui/access.log`
+The app logs only to stdout/stderr (standard practice for containers), view them with:
 
-`docker exec amnezia-web-ui tail -f /var/log/web-ui/error.log`
-
-### Nginx logs
-
-`docker exec amnezia-web-ui tail -f /var/log/nginx/access.log`
-
-`docker exec amnezia-web-ui tail -f /var/log/nginx/error.log`
-
-### Supervisor logs
-
-`docker exec amnezia-web-ui tail -f /var/log/supervisor/supervisord.log`
+`docker logs -f amnezia-web-ui`
 
 ## 🔄 Backup and Restore
 Export Configuration
@@ -382,15 +328,13 @@ Export Configuration
 `curl "http://localhost/api/system/iptables-test?server_id=wg_abc123"`
 
 # Security
-The app is exposed directly on 80 or custom port with basic authentication.
+The app is exposed directly on port 80 (or a custom `WEB_UI_PORT`) with basic authentication built into the Fiber app itself.
 
 > [!IMPORTANT]
-> I strongly recommend protecting endpoints with firewall and/or nginx authentication.
+> I strongly recommend protecting endpoints with a firewall and/or a TLS-terminating reverse proxy in front of the container.
 > Basic auth alone is not strong enough and can be bruteforced.
 
-By default, docker image is built with user `admin` and password `changeme`. To change the default behavior you need to provide with docker envs `NGINX_USER` and `NGINX_PASSWORD`.
-
-I recommend enabling IP limitation together with other protection methods (see section `Protection by IP address` above).
+By default, docker image is built with user `admin` and password `changeme`. To change the default behavior you need to provide with docker envs `WEB_UI_USER` and `WEB_UI_PASSWORD`.
 
 # Support
 The NO support provided as well as no regular updates are planned. Found issues can be fixed if free time permits.

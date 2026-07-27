@@ -7,7 +7,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.8.1/socket.io.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body class="bg-gray-100">
     <div class="container mx-auto px-4 py-8">
@@ -54,7 +54,7 @@
                         </div>
                         <div>
                             <label class="block text-sm font-medium text-gray-700">Port *</label>
-                            <input type="number" id="serverPort" value="51820" class="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2" required>
+                            <input type="number" id="serverPort" value="51834" class="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2" required>
                             <p id="portError" class="text-red-500 text-xs mt-1 hidden">Port is required</p>
                         </div>
                     </div>
@@ -190,34 +190,15 @@
             </div>
         </div>
 
-        <!-- Logs Section -->
-        <div class="mt-8 bg-white rounded-lg shadow-md">
-            <div class="flex justify-between items-center p-4 cursor-pointer hover:bg-gray-50"
-                 onclick="amneziaApp.toggleLogsSection()">
-                <h2 class="text-xl font-bold text-gray-800">📋 System Logs</h2>
-                <button class="text-gray-600 hover:text-gray-800">
-                    <span id="logsToggleIcon">▼</span>
-                </button>
-            </div>
-            <div id="logsContainer" class="hidden p-4 border-t border-gray-200">
-                <div id="logTabs" class="mb-4">
-                    <!-- Tabs will be loaded here -->
-                </div>
-                <div id="logContent" class="mt-4">
-                    <!-- Log content will be displayed here -->
-                </div>
-            </div>
-        </div>
-
         <!-- Copyright Footer -->
         <div class="mt-8 text-center text-gray-400 text-sm">
-            <a href="https://github.com/AlexisHW/amneziawg-web-ui/" target="_blank" rel="noopener noreferrer" class="hover:text-gray-600 transition duration-200">
-                © AmneziaWG Web UI
+            <a href="https://github.com/KateFox1982/amneziawg-go-web-ui" target="_blank" rel="noopener noreferrer" class="hover:text-gray-600 transition duration-200">
+                © AmneziaWG Go Web UI
             </a>
         </div>
 
     </div>
 
-    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script src="/static/js/app.js"></script>
 </body>
 </html>
