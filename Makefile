@@ -50,7 +50,7 @@ fix: check-go ## Run go fix
 	go fix ./...
 
 .PHONY: deploy
-deploy: ## Deploy (host name is requested at runtime)
+deploy: ## Deploy via docker (host name is requested at runtime)
 	@read -p "Enter host for deployment: " HOST; \
 	echo "build"; \
 	docker buildx build --load --file Dockerfile --progress=plain --tag "proxy:latest" .; \
@@ -65,6 +65,6 @@ deploy: ## Deploy (host name is requested at runtime)
 		proxy.tar \
 		"$$HOST:/usr/local/include/proxy/"; \
 	echo "deploying on $$HOST"; \
-	ssh "$$HOST" "cd /usr/local/include/proxy && (nerdctl compose down || true) && (nerdctl image rm -f 'proxy:latest' || true) && nerdctl load < proxy.tar && nerdctl compose up -d && rm -rf /usr/local/include/proxy"
+	ssh "$$HOST" "cd /usr/local/include/proxy && (docker compose down || true) && (docker image rm -f 'proxy:latest' || true) && docker load < proxy.tar && docker compose up -d && rm -rf /usr/local/include/proxy"
 
 

@@ -1,11 +1,5 @@
 FROM golang:1.26-alpine AS builder
 RUN apk add --no-cache git make gcc musl-dev linux-headers
-RUN --mount=type=cache,id=awg_mod,target=/go/pkg/mod \
-    --mount=type=cache,id=awg_build,target=/root/.cache/go-build \
-     git clone https://github.com/amnezia-vpn/amneziawg-go.git && cd amneziawg-go && make && make install
-RUN  --mount=type=cache,id=awg_mod,target=/go/pkg/mod \
-    --mount=type=cache,id=awg_build,target=/root/.cache/go-build \
-    git clone https://github.com/amnezia-vpn/amneziawg-tools.git && cd amneziawg-tools/src && make && make WITH_WGQUICK=yes install
 
 WORKDIR /build
 COPY go.mod go.sum ./
@@ -16,6 +10,13 @@ COPY . .
 RUN --mount=type=cache,id=awg_mod,target=/go/pkg/mod \
     --mount=type=cache,id=awg_build,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /app/api .
+
+RUN --mount=type=cache,id=awg_mod,target=/go/pkg/mod \
+    --mount=type=cache,id=awg_build,target=/root/.cache/go-build \
+     git clone https://github.com/amnezia-vpn/amneziawg-go.git && cd amneziawg-go && make && make install
+RUN  --mount=type=cache,id=awg_mod,target=/go/pkg/mod \
+    --mount=type=cache,id=awg_build,target=/root/.cache/go-build \
+    git clone https://github.com/amnezia-vpn/amneziawg-tools.git && cd amneziawg-tools/src && make && make WITH_WGQUICK=yes install
 
 # ── Final image ───────────────────────────────────────────────────────────────
 FROM alpine:3.19
