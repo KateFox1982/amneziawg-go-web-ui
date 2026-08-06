@@ -14,9 +14,6 @@ the API, except `WEB_UI_PORT`.
 <img src="screenshot2.png" alt="Web UI screenshot" width="50%"/>
 <img src="screenshot.png" alt="Web UI screenshot" width="50%"/>
 
-> [!TIP]
-> For project description in **Russian** please refer to [author blog page](https://itprospb.ru/2025/11/web-ui-dlya-upravleniya-serverom-amneziawg/).
-
 ## 🔒 AmneziaWG 3.0, front and center
 
 This is the headline feature of the project: **every server created here
