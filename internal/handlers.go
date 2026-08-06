@@ -57,6 +57,7 @@ func (h *Handlers) RegisterRoutes(app *fiber.App) {
 	api.Put("/servers/:id/clients/:clientId/i-settings", h.updateClientISettings)
 	api.Get("/servers/:id/clients/:clientId/config", h.downloadClientConfig)
 	api.Get("/servers/:id/clients/:clientId/config-both", h.getClientConfigBoth)
+	api.Get("/servers/:id/clients/:clientId/link", h.getClientAmneziaLink)
 	api.Post("/servers/:id/clients/:clientId/suspend", h.suspendClient)
 	api.Post("/servers/:id/clients/:clientId/activate", h.activateClient)
 	api.Put("/servers/:id/clients/:clientId/suspend-time", h.updateClientSuspendTime)
@@ -302,6 +303,22 @@ func (h *Handlers) downloadClientConfig(c fiber.Ctx) error {
 	c.Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
 	c.Set("Content-Type", "text/plain; charset=utf-8")
 	return c.SendString(configContent)
+}
+
+func (h *Handlers) getClientAmneziaLink(c fiber.Ctx) error {
+	id := c.Params("id")
+	clientID := c.Params("clientId")
+
+	gc, ok := h.mgr.getClientInServer(id, clientID)
+	if !ok {
+		return c.Status(404).JSON(fiber.Map{"error": "client not found"})
+	}
+
+	vpnURL, err := h.mgr.GenerateAmneziaVpnURL(id, &gc)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(fiber.Map{"vpn_url": vpnURL})
 }
 
 func (h *Handlers) getClientConfigBoth(c fiber.Ctx) error {

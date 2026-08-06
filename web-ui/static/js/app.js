@@ -75,14 +75,6 @@ class AmneziaApp {
             this.toggleObfuscationParams(obfuscationCheckbox.checked);
         }
 
-        const awg2Checkbox = this.getElement('enableAwg2');
-        if (awg2Checkbox) {
-            awg2Checkbox.addEventListener('change', (e) => {
-                this.toggleAwg2Fields(e.target.checked);
-            });
-            this.toggleAwg2Fields(awg2Checkbox.checked);
-        }
-
         // Form validation listeners
         this.setupFormValidation();
         
@@ -131,14 +123,6 @@ class AmneziaApp {
         if (obfuscationParams) {
             obfuscationParams.style.display = show ? 'block' : 'none';
         }
-    }
-
-    toggleAwg2Fields(show) {
-        const s3Field = document.getElementById('awg2FieldS3');
-        const s4Field = document.getElementById('awg2FieldS4');
-        
-        if (s3Field) s3Field.style.display = show ? 'block' : 'none';
-        if (s4Field) s4Field.style.display = show ? 'block' : 'none';
     }
 
     updateTrafficDisplay(trafficData) {
@@ -361,8 +345,8 @@ class AmneziaApp {
         if (jcElement) jcElement.value = Math.floor(Math.random() * 9) + 4; // 4-12
         if (s1Element) s1Element.value = Math.floor(Math.random() * 136) + 15; // 15-150
         if (s2Element) s2Element.value = Math.floor(Math.random() * 136) + 15; // 15-150
-        if (s3Element) s3Element.value = Math.floor(Math.random() * 256) + 1; // 1-256
-        if (s4Element) s4Element.value = Math.floor(Math.random() * 32) + 1; // 1-32
+        if (s3Element) s3Element.value = Math.floor(Math.random() * 245) + 12; // 12-256 (header protection requires >= 12)
+        if (s4Element) s4Element.value = Math.floor(Math.random() * 21) + 12; // 12-32 (header protection requires >= 12)
         
         // Generate unique H values
         const hValues = new Set();
@@ -415,6 +399,22 @@ class AmneziaApp {
         }
         if (params.S4 > 32) {
             errors.push(`S4 (${params.S4}) must be in range [0, 32]`);
+        }
+
+        // Obfuscation is always AmneziaWG 3.0 header protection, which needs
+        // S1-S4 >= 12: the cipher's 12-byte nonce is taken from the start of
+        // the padding.
+        for (const key of ['S1', 'S2', 'S3', 'S4']) {
+            if ((params[key] ?? 0) < 12) {
+                errors.push(`${key} (${params[key]}) must be at least 12 for AmneziaWG 3.0 header protection`);
+            }
+        }
+        const rangeRe = /^\d+(-\d+)?$/;
+        for (const key of ['ContentPaddingAddition', 'RekeyAfterTime', 'RekeyTimeout', 'RejectAfterTime', 'KeepaliveTimeout', 'MaxHandshakeAttempts', 'PersistentKeepalive']) {
+            const v = params[key];
+            if (v && !rangeRe.test(v)) {
+                errors.push(`${key} (${v}) must be an integer or an "a-b" range`);
+            }
         }
 
         return errors;
@@ -548,7 +548,6 @@ class AmneziaApp {
         const mtuElement = this.getElement('serverMTU');
         const dnsElement = this.getElement('serverDNS');
         const obfuscationElement = this.getElement('enableObfuscation');
-        const awg2Element = this.getElement('enableAwg2');
         const autoStartElement = this.getElement('autoStart');
         const endpointElement = this.getElement('serverEndpoint');
 
@@ -559,41 +558,50 @@ class AmneziaApp {
             mtu: mtuElement ? parseInt(mtuElement.value) : 1420,
             dns: dnsElement ? dnsElement.value.trim() : '8.8.8.8,1.1.1.1',
             obfuscation: obfuscationElement ? obfuscationElement.checked : true,
-            awg2: awg2Element ? awg2Element.checked : true,
             auto_start: autoStartElement ? autoStartElement.checked : true,
             endpoint: endpointElement ? endpointElement.value.trim() : ''
         };
 
         console.log("Form data:", formData);
 
-        // Add obfuscation parameters if enabled
+        // Add obfuscation parameters if enabled. Obfuscation is always the
+        // full AmneziaWG 3.0 parameter set now (1.0/1.5/2.0-only modes are
+        // no longer supported).
         if (formData.obfuscation) {
-            if (formData.obfuscation && formData.awg2) {
-                formData.obfuscation_params = {
-                    Jc: parseInt(this.getElement('paramJc')?.value || '8'),
-                    Jmin: parseInt(this.getElement('paramJmin')?.value || '8'),
-                    Jmax: parseInt(this.getElement('paramJmax')?.value || '80'),
-                    S1: parseInt(this.getElement('paramS1')?.value || '50'),
-                    S2: parseInt(this.getElement('paramS2')?.value || '60'),
-                    S3: parseInt(this.getElement('paramS3')?.value || '0'),
-                    S4: parseInt(this.getElement('paramS4')?.value || '0'),
-                    H1: parseInt(this.getElement('paramH1')?.value || '1000'),
-                    H2: parseInt(this.getElement('paramH2')?.value || '2000'),
-                    H3: parseInt(this.getElement('paramH3')?.value || '3000'),
-                    H4: parseInt(this.getElement('paramH4')?.value || '4000'),
-                };
-            } else {
-                formData.obfuscation_params = {
-                    Jc: parseInt(this.getElement('paramJc')?.value || '8'),
-                    Jmin: parseInt(this.getElement('paramJmin')?.value || '8'),
-                    Jmax: parseInt(this.getElement('paramJmax')?.value || '80'),
-                    S1: parseInt(this.getElement('paramS1')?.value || '50'),
-                    S2: parseInt(this.getElement('paramS2')?.value || '60'),
-                    H1: parseInt(this.getElement('paramH1')?.value || '1000'),
-                    H2: parseInt(this.getElement('paramH2')?.value || '2000'),
-                    H3: parseInt(this.getElement('paramH3')?.value || '3000'),
-                    H4: parseInt(this.getElement('paramH4')?.value || '4000'),
-                };
+            formData.obfuscation_params = {
+                Jc: parseInt(this.getElement('paramJc')?.value || '8'),
+                Jmin: parseInt(this.getElement('paramJmin')?.value || '8'),
+                Jmax: parseInt(this.getElement('paramJmax')?.value || '80'),
+                S1: parseInt(this.getElement('paramS1')?.value || '50'),
+                S2: parseInt(this.getElement('paramS2')?.value || '60'),
+                S3: parseInt(this.getElement('paramS3')?.value || '20'),
+                S4: parseInt(this.getElement('paramS4')?.value || '16'),
+                H1: parseInt(this.getElement('paramH1')?.value || '1000'),
+                H2: parseInt(this.getElement('paramH2')?.value || '2000'),
+                H3: parseInt(this.getElement('paramH3')?.value || '3000'),
+                H4: parseInt(this.getElement('paramH4')?.value || '4000'),
+            };
+
+            const headerKey = this.getElement('paramHeaderProtectionKey')?.value.trim();
+            if (headerKey) {
+                formData.obfuscation_params.HeaderProtectionKey = headerKey;
+            }
+            // Optional AWG 3.0 client-side timing knobs: only send the ones
+            // the user actually filled in.
+            const advancedFieldMap = {
+                paramContentPaddingAddition: 'ContentPaddingAddition',
+                paramRekeyAfterTime: 'RekeyAfterTime',
+                paramRekeyTimeout: 'RekeyTimeout',
+                paramRejectAfterTime: 'RejectAfterTime',
+                paramKeepaliveTimeout: 'KeepaliveTimeout',
+                paramMaxHandshakeAttempts: 'MaxHandshakeAttempts',
+                paramPersistentKeepalive: 'PersistentKeepalive',
+            };
+            for (const [elementId, paramKey] of Object.entries(advancedFieldMap)) {
+                const raw = this.getElement(elementId)?.value.trim();
+                if (raw) {
+                    formData.obfuscation_params[paramKey] = raw;
+                }
             }
 
             const obfErrors = this.validateObfuscationParamsJS(formData.obfuscation_params, formData.mtu);
@@ -1070,7 +1078,7 @@ class AmneziaApp {
                                         ${applyISettings ? 'checked' : ''}
                                         class="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
                                     <label for="applyISettings" class="ml-3 block text-sm font-medium text-gray-700">
-                                        Apply I-settings (AmneziaWG 1.5 protocol)
+                                        Apply I-settings (custom signature packets I1-I5)
                                     </label>
                                 </div>
                                 <p class="text-sm text-gray-500 mb-4">
@@ -1474,7 +1482,7 @@ class AmneziaApp {
                                 <h4 class="font-semibold text-sm text-gray-700 mb-2">Configuration</h4>
                                 <div class="space-y-1 text-sm">
                                     <div><span class="font-medium">Protocol:</span> ${serverInfo.protocol}</div>
-                                    <div><span class="font-medium">Obfuscation:</span> ${serverInfo.obfuscation_enabled ? 'Enabled' : 'Disabled'}</div>
+                                    <div><span class="font-medium">Obfuscation:</span> ${serverInfo.obfuscation_enabled ? 'Enabled (AmneziaWG 3.0)' : 'Disabled'}</div>
                                     <div><span class="font-medium">Clients:</span> ${serverInfo.clients_count}</div>
                                     <div><span class="font-medium">DNS:</span> ${serverInfo.dns.join(', ')}</div>
                                     <div><span class="font-medium">MTU:</span> ${serverInfo.mtu}</div>
@@ -1501,7 +1509,7 @@ class AmneziaApp {
 
                         ${serverInfo.default_i_settings ? `
                         <div class="bg-purple-50 p-3 rounded mb-4">
-                            <h4 class="font-semibold text-sm text-purple-700 mb-2">Default I-settings (AmneziaWG 1.5)</h4>
+                            <h4 class="font-semibold text-sm text-purple-700 mb-2">Default I-settings (custom signature packets I1-I5)</h4>
                             <div class="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
                                 ${Object.entries(serverInfo.default_i_settings).map(([key, value]) => `
                                     <div class="text-center">
@@ -1670,16 +1678,25 @@ class AmneziaApp {
                                 <div class="mb-4">
                                     <div class="flex items-center justify-between mb-2">
                                         <label class="block text-sm font-medium text-gray-700">Configuration preview</label>
-                                        <div class="flex space-x-2">
-                                            <button onclick="amneziaApp.toggleConfigView()"
-                                                    class="text-blue-500 hover:text-blue-700 text-sm font-medium px-3 py-1.5 rounded-lg border border-blue-200 hover:bg-blue-50 transition-colors duration-200">
-                                                Toggle View
-                                            </button>
-                                            <button onclick="amneziaApp.copyConfigText()"
-                                                    class="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white px-4 py-1.5 rounded-lg text-sm font-medium transition-colors duration-200 shadow hover:shadow-md">
-                                                Copy Config
-                                            </button>
-                                        </div>
+                                        <button onclick="amneziaApp.copyConfigText()"
+                                                class="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white px-4 py-1.5 rounded-lg text-sm font-medium transition-colors duration-200 shadow hover:shadow-md">
+                                            Copy Config
+                                        </button>
+                                    </div>
+                                    <div id="configViewTabs" class="flex space-x-1 bg-gray-100 rounded-lg p-1 mb-2 w-fit">
+                                        <button onclick="amneziaApp.setConfigView('amnezia')" id="viewTabAmnezia"
+                                                class="px-3 py-1 rounded-md text-xs font-medium transition-colors duration-150"
+                                                title="AmneziaVPN native link - use this so the official app recognizes AWG 3.0">
+                                            AmneziaVPN Link
+                                        </button>
+                                        <button onclick="amneziaApp.setConfigView('clean')" id="viewTabClean"
+                                                class="px-3 py-1 rounded-md text-xs font-medium transition-colors duration-150">
+                                            .conf
+                                        </button>
+                                        <button onclick="amneziaApp.setConfigView('full')" id="viewTabFull"
+                                                class="px-3 py-1 rounded-md text-xs font-medium transition-colors duration-150">
+                                            .conf (full)
+                                        </button>
                                     </div>
                                     <textarea id="configText" rows="12"
                                         class="w-full px-4 py-3 border-2 border-gray-200 rounded-xl text-sm font-mono bg-gray-50 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
@@ -1740,8 +1757,28 @@ class AmneziaApp {
                 const data = await response.json();
                 this.currentCleanConfig = data.clean_config || '';
                 this.currentFullConfig = data.full_config || '';
-                this.currentConfigType = 'clean';
-                
+
+                // Fetch the AmneziaVPN native "vpn://" link too. Importing a
+                // plain .conf makes the official Amnezia app tag the server
+                // as the legacy "amnezia-awg" container (shows as AmneziaWG
+                // 2.0, no header protection) instead of "amnezia-awg2" -
+                // this link carries the container/protocol_version fields
+                // that make the app recognize AWG 3.0 correctly. It's the
+                // recommended way to connect, so it's the default view.
+                try {
+                    const amneziaUrl = `/api/servers/${this.qrServerId}/clients/${this.qrClientId}/link`;
+                    const amneziaResponse = await fetch(amneziaUrl);
+                    if (amneziaResponse.ok) {
+                        const amneziaData = await amneziaResponse.json();
+                        this.currentAmneziaConfig = amneziaData.vpn_url || '';
+                    } else {
+                        this.currentAmneziaConfig = '';
+                    }
+                } catch (e) {
+                    this.currentAmneziaConfig = '';
+                }
+                this.currentConfigType = this.currentAmneziaConfig ? 'amnezia' : 'clean';
+
                 // Update date information in the modal
                 if (data.created_at) {
                     const createdDate = new Date(data.created_at * 1000);
@@ -1785,37 +1822,11 @@ class AmneziaApp {
                 const configText = await configResponse.text();
                 this.currentCleanConfig = configText;
                 this.currentFullConfig = configText;
+                this.currentAmneziaConfig = '';
                 this.currentConfigType = 'clean';
             }
-            
-            // Update UI elements
-            const configTextArea = document.getElementById('configText');
-            const configLengthSpan = document.getElementById('configLength');
-            const configTypeLabel = document.getElementById('configType');
-            
-            if (configTextArea) configTextArea.value = this.currentCleanConfig;
-            if (configLengthSpan) configLengthSpan.textContent = `Length: ${this.currentCleanConfig.length} chars`;
-            if (configTypeLabel) configTypeLabel.textContent = 'Clean Config';
-            
-            // Get DOM elements
-            const qrWarning = document.getElementById('qrTooLargeWarning');
-            const qrContainer = document.getElementById('qrCodeContainer');
-            const qrCodeText = document.getElementById('qrCodeText');
-            const downloadQRBtn = document.getElementById('downloadQRBtn');
-            const qrDiv = document.getElementById('qrcode');
-            
-            // Check if config is too large for QR code
-            const isTooLarge = this.currentCleanConfig.length > 2000;
-            
-            if (isTooLarge) {
-                // Show size warning BEFORE attempting QR generation
-                this.showSizeWarning(qrWarning, qrContainer, qrCodeText, downloadQRBtn, qrDiv);
-                return; // Stop here, don't try to generate QR code
-            }
-            else {
-                // Config is small enough, try to generate QR code
-                this.generateQRCode(qrWarning, qrContainer, qrCodeText, downloadQRBtn, qrDiv);
-            }
+
+            this.renderActiveConfigView();
         } catch (error) {
             console.error('Error fetching config for QR code:', error);
             this.showTempMessage('Failed to generate QR code: ' + error.message, 'error');
@@ -1823,43 +1834,86 @@ class AmneziaApp {
         }
     }
 
+    // Returns the config text for the currently selected view.
+    getActiveConfigText() {
+        if (this.currentConfigType === 'amnezia') return this.currentAmneziaConfig || '';
+        if (this.currentConfigType === 'full') return this.currentFullConfig || '';
+        return this.currentCleanConfig || '';
+    }
+
+    // Renders the config text box + QR code for whichever view is active
+    // (clean/full .conf, or the AmneziaVPN native "vpn://" link).
+    renderActiveConfigView() {
+        const activeText = this.getActiveConfigText();
+
+        const configTextArea = document.getElementById('configText');
+        const configLengthSpan = document.getElementById('configLength');
+        if (configTextArea) configTextArea.value = activeText;
+        if (configLengthSpan) configLengthSpan.textContent = `Length: ${activeText.length} chars`;
+        this.updateConfigTypeLabel();
+        this.updateViewTabs();
+
+        const qrWarning = document.getElementById('qrTooLargeWarning');
+        const qrContainer = document.getElementById('qrCodeContainer');
+        const qrCodeText = document.getElementById('qrCodeText');
+        const downloadQRBtn = document.getElementById('downloadQRBtn');
+        const qrDiv = document.getElementById('qrcode');
+        if (qrCodeText && this.currentConfigType !== 'amnezia') {
+            qrCodeText.textContent = 'Scan with AmneziaWG / AmneziaVPN app';
+        } else if (qrCodeText) {
+            qrCodeText.textContent = 'Scan with AmneziaVPN app (recognized as AWG 3.0)';
+        }
+
+        if (!activeText) {
+            this.showSizeWarning(qrWarning, qrContainer, qrCodeText, downloadQRBtn, qrDiv, activeText);
+            return;
+        }
+
+        if (activeText.length > 2000) {
+            this.showSizeWarning(qrWarning, qrContainer, qrCodeText, downloadQRBtn, qrDiv, activeText);
+        } else {
+            this.generateQRCode(qrWarning, qrContainer, qrCodeText, downloadQRBtn, qrDiv, activeText);
+        }
+    }
+
     // Helper method to show size warning
-    showSizeWarning(qrWarning, qrContainer, qrCodeText, downloadQRBtn, qrDiv) {
+    showSizeWarning(qrWarning, qrContainer, qrCodeText, downloadQRBtn, qrDiv, activeText) {
         // Hide QR code section
         if (qrContainer) qrContainer.classList.add('hidden');
         if (qrCodeText) qrCodeText.classList.add('hidden');
         if (downloadQRBtn) downloadQRBtn.classList.add('hidden');
         if (qrDiv) qrDiv.innerHTML = '';
-        
+
         // Show warning with size information
         if (qrWarning) {
             qrWarning.classList.remove('hidden');
             const warningText = qrWarning.querySelector('p');
             if (warningText) {
-                warningText.innerHTML =
-                    `<strong>Config too large for QR code!</strong><br>
-                    Configuration size: ${this.currentCleanConfig.length} characters (max: 2000).<br>
-                    Please use "Download Config File" instead.`;
+                warningText.innerHTML = activeText
+                    ? `<strong>Config too large for QR code!</strong><br>
+                    Configuration size: ${activeText.length} characters (max: 2000).<br>
+                    Please use "Download Config File" instead.`
+                    : `<strong>This view is unavailable.</strong>`;
             }
         }
     }
 
     // Helper method to generate QR code
-    generateQRCode(qrWarning, qrContainer, qrCodeText, downloadQRBtn, qrDiv) {
+    generateQRCode(qrWarning, qrContainer, qrCodeText, downloadQRBtn, qrDiv, activeText) {
         // Show QR code section
         if (qrWarning) qrWarning.classList.add('hidden');
         if (qrContainer) qrContainer.classList.remove('hidden');
         if (qrCodeText) qrCodeText.classList.remove('hidden');
         if (downloadQRBtn) downloadQRBtn.classList.remove('hidden');
-        
+
         // Clear previous QR code
         if (qrDiv) {
             qrDiv.innerHTML = '';
-            
+
             try {
                 // Generate new QR code
                 new QRCode(qrDiv, {
-                    text: this.currentCleanConfig,
+                    text: activeText,
                     width: 300,
                     height: 300,
                     colorDark: "#000000",
@@ -1867,12 +1921,12 @@ class AmneziaApp {
                     correctLevel: QRCode.CorrectLevel.M,
                     margin: 1
                 });
-                
+
                 console.log('QR code generated successfully');
-                
+
             } catch (qrError) {
                 console.error('QR code generation error:', qrError);
-                
+
                 // Show error in warning box
                 if (qrWarning) {
                     qrWarning.classList.remove('hidden');
@@ -1883,7 +1937,7 @@ class AmneziaApp {
                             ${qrError.message}<br>
                             Please use "Download Config File" instead.`;
                     }
-                    
+
                     // Hide QR code section again
                     if (qrContainer) qrContainer.classList.add('hidden');
                     if (qrCodeText) qrCodeText.classList.add('hidden');
@@ -1895,25 +1949,36 @@ class AmneziaApp {
 
     updateConfigTypeLabel() {
         const configTypeLabel = document.getElementById('configType');
-        if (configTypeLabel) {
-            configTypeLabel.textContent = this.currentConfigType === 'clean' ? 'Clean Config' : 'Full Config';
-        }
+        if (!configTypeLabel) return;
+        const labels = { clean: 'Clean Config', full: 'Full Config', amnezia: 'AmneziaVPN Link (vpn://, AWG 3.0)' };
+        configTypeLabel.textContent = labels[this.currentConfigType] || 'Clean Config';
     }
 
-    toggleConfigView() {
-        const configTextArea = document.getElementById('configText');
-        
-        if (this.currentConfigType === 'clean') {
-            // Switch to full config
-            configTextArea.value = this.currentFullConfig;
-            this.currentConfigType = 'full';
-        } else {
-            // Switch to clean config
-            configTextArea.value = this.currentCleanConfig;
-            this.currentConfigType = 'clean';
+    // Switches the preview/QR code to one of: 'clean', 'full', or 'amnezia'
+    // (the AmneziaVPN native "vpn://" link).
+    setConfigView(mode) {
+        if (mode === 'amnezia' && !this.currentAmneziaConfig) return;
+        this.currentConfigType = mode;
+        this.renderActiveConfigView();
+    }
+
+    updateViewTabs() {
+        const tabs = {
+            clean: document.getElementById('viewTabClean'),
+            full: document.getElementById('viewTabFull'),
+            amnezia: document.getElementById('viewTabAmnezia'),
+        };
+        for (const [mode, btn] of Object.entries(tabs)) {
+            if (!btn) continue;
+            const active = this.currentConfigType === mode;
+            const disabled = mode === 'amnezia' && !this.currentAmneziaConfig;
+            btn.disabled = disabled;
+            btn.className = 'px-3 py-1 rounded-md text-xs font-medium transition-colors duration-150 ' + (
+                disabled ? 'text-gray-300 cursor-not-allowed'
+                : active ? 'bg-white text-blue-600 shadow'
+                : 'text-gray-500 hover:text-gray-700'
+            );
         }
-        
-        this.updateConfigTypeLabel();
     }
 
     downloadQRCode() {

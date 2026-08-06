@@ -245,6 +245,14 @@ func randomBase64Key() string {
 	return base64.StdEncoding.EncodeToString(b)
 }
 
+// awg3MinPadding is the minimum value AmneziaWG 3.0 requires for S1-S4 when
+// header protection is enabled: the cipher's 12-byte nonce is taken from the
+// start of the padding, so anything smaller can't fit it.
+const awg3MinPadding = 12
+
+// generateObfuscationParams generates a full set of AmneziaWG 3.0 obfuscation
+// parameters, including a header protection key. Obfuscation in this app is
+// always AmneziaWG 3.0 - there's no more separate 1.0/1.5/2.0 mode.
 func (m *Manager) generateObfuscationParams(mtu int) ObfuscationParams {
 	rng := rand.New(rand.NewSource(time.Now().UnixNano())) //nolint:gosec
 
@@ -270,18 +278,65 @@ func (m *Manager) generateObfuscationParams(mtu int) ObfuscationParams {
 	jmax := jmin + 1 + rng.Intn(mtu-jmin)
 
 	return ObfuscationParams{
-		Jc:   rng.Intn(9) + 4,
-		Jmin: jmin,
-		Jmax: jmax,
-		S1:   s1,
-		S2:   s2,
-		S3:   rng.Intn(256) + 1,
-		S4:   rng.Intn(32) + 1,
-		H1:   rng.Intn(90001) + 10000,
-		H2:   rng.Intn(100001) + 100000,
-		H3:   rng.Intn(100001) + 200000,
-		H4:   rng.Intn(100001) + 300000,
-		MTU:  mtu,
+		Jc:                  rng.Intn(9) + 4,
+		Jmin:                jmin,
+		Jmax:                jmax,
+		S1:                  s1,
+		S2:                  s2,
+		S3:                  rng.Intn(256-awg3MinPadding+1) + awg3MinPadding,
+		S4:                  rng.Intn(32-awg3MinPadding+1) + awg3MinPadding,
+		H1:                  rng.Intn(90001) + 10000,
+		H2:                  rng.Intn(100001) + 100000,
+		H3:                  rng.Intn(100001) + 200000,
+		H4:                  rng.Intn(100001) + 300000,
+		MTU:                 mtu,
+		HeaderProtectionKey: randomBase64Key(),
+	}
+}
+
+// validateObfuscationParams checks the AmneziaWG 3.0 header protection
+// requirement: S1-S4 must all be at least awg3MinPadding, since the cipher's
+// nonce is taken from the start of that padding. It also validates the
+// format of the optional client-side range tuning knobs, if any were
+// provided.
+func validateObfuscationParams(p *ObfuscationParams) error {
+	if p == nil {
+		return fmt.Errorf("obfuscation parameters are required")
+	}
+	for name, v := range map[string]int{"S1": p.S1, "S2": p.S2, "S3": p.S3, "S4": p.S4} {
+		if v < awg3MinPadding {
+			return fmt.Errorf("%s must be at least %d for AmneziaWG 3.0 header protection, got %d", name, awg3MinPadding, v)
+		}
+	}
+	for name, v := range map[string]string{
+		"ContentPaddingAddition": p.ContentPaddingAddition,
+		"RekeyAfterTime":         p.RekeyAfterTime,
+		"RekeyTimeout":           p.RekeyTimeout,
+		"RejectAfterTime":        p.RejectAfterTime,
+		"KeepaliveTimeout":       p.KeepaliveTimeout,
+		"MaxHandshakeAttempts":   p.MaxHandshakeAttempts,
+		"PersistentKeepalive":    p.PersistentKeepalive,
+	} {
+		if v != "" && !isValidUintRange(v) {
+			return fmt.Errorf("%s must be an integer or an \"a-b\" range, got %q", name, v)
+		}
+	}
+	return nil
+}
+
+// isValidUintRange reports whether s is a plain non-negative integer or an
+// "a-b" range of them, the format amneziawg-tools expects for its AWG 3.0
+// range-typed config keys.
+func isValidUintRange(s string) bool {
+	return uintRangeRe.MatchString(s)
+}
+
+var uintRangeRe = regexp.MustCompile(`^\d+(-\d+)?$`)
+
+// writeIfSet writes "key = value\n" to sb only if value is non-empty.
+func writeIfSet(sb *strings.Builder, key, value string) {
+	if value != "" {
+		fmt.Fprintf(sb, "%s = %s\n", key, value)
 	}
 }
 
@@ -369,6 +424,9 @@ func (m *Manager) CreateServer(req CreateServerRequest) (*Server, error) {
 		pubKey = randomBase64Key()
 	}
 
+	// AmneziaWG 1.0/1.5/2.0-only modes are no longer supported: enabling
+	// obfuscation always means the full AmneziaWG 3.0 parameter set,
+	// including mandatory header protection.
 	var obfParams *ObfuscationParams
 	if enableObfuscation {
 		if req.ObfuscationParams != nil {
@@ -376,6 +434,12 @@ func (m *Manager) CreateServer(req CreateServerRequest) (*Server, error) {
 		} else {
 			p := m.generateObfuscationParams(mtu)
 			obfParams = &p
+		}
+		if obfParams.HeaderProtectionKey == "" {
+			obfParams.HeaderProtectionKey = randomBase64Key()
+		}
+		if err := validateObfuscationParams(obfParams); err != nil {
+			return nil, err
 		}
 	}
 
@@ -402,14 +466,21 @@ func (m *Manager) CreateServer(req CreateServerRequest) (*Server, error) {
 		fmt.Fprintf(&sb, "Jmax = %d\n", obfParams.Jmax)
 		fmt.Fprintf(&sb, "S1 = %d\n", obfParams.S1)
 		fmt.Fprintf(&sb, "S2 = %d\n", obfParams.S2)
-		if req.AWG2 {
-			fmt.Fprintf(&sb, "S3 = %d\n", obfParams.S3)
-			fmt.Fprintf(&sb, "S4 = %d\n", obfParams.S4)
-		}
+		fmt.Fprintf(&sb, "S3 = %d\n", obfParams.S3)
+		fmt.Fprintf(&sb, "S4 = %d\n", obfParams.S4)
 		fmt.Fprintf(&sb, "H1 = %d\n", obfParams.H1)
 		fmt.Fprintf(&sb, "H2 = %d\n", obfParams.H2)
 		fmt.Fprintf(&sb, "H3 = %d\n", obfParams.H3)
 		fmt.Fprintf(&sb, "H4 = %d\n", obfParams.H4)
+		if obfParams.HeaderProtectionKey != "" {
+			fmt.Fprintf(&sb, "HeaderProtectionKey = %s\n", obfParams.HeaderProtectionKey)
+		}
+		writeIfSet(&sb, "ContentPaddingAddition", obfParams.ContentPaddingAddition)
+		writeIfSet(&sb, "RekeyAfterTime", obfParams.RekeyAfterTime)
+		writeIfSet(&sb, "RekeyTimeout", obfParams.RekeyTimeout)
+		writeIfSet(&sb, "RejectAfterTime", obfParams.RejectAfterTime)
+		writeIfSet(&sb, "KeepaliveTimeout", obfParams.KeepaliveTimeout)
+		writeIfSet(&sb, "MaxHandshakeAttempts", obfParams.MaxHandshakeAttempts)
 	}
 
 	if err := os.WriteFile(configPath, []byte(sb.String()), 0o600); err != nil {
@@ -432,7 +503,6 @@ func (m *Manager) CreateServer(req CreateServerRequest) (*Server, error) {
 		PublicIP:           endpoint,
 		Endpoint:           endpoint,
 		ObfuscationEnabled: enableObfuscation,
-		AWG2Enabled:        req.AWG2,
 		ObfuscationParams:  obfParams,
 		AutoStart:          autoStart,
 		DNS:                dnsServers,
@@ -737,7 +807,6 @@ func (m *Manager) addClientLocked(serverID, clientName string, applyI bool, iSet
 		ObfuscationParams:  srv.ObfuscationParams,
 		ApplyISettings:     applyI,
 		ISettings:          clientISettings,
-		AWG2Enabled:        srv.AWG2Enabled,
 		AllowedIPs:         clientAllowedIPs,
 	}
 
@@ -942,14 +1011,21 @@ func (m *Manager) GenerateClientConfig(serverID string, client *Client, includeC
 		fmt.Fprintf(&sb, "Jmax = %d\n", p.Jmax)
 		fmt.Fprintf(&sb, "S1 = %d\n", p.S1)
 		fmt.Fprintf(&sb, "S2 = %d\n", p.S2)
-		if client.AWG2Enabled {
-			fmt.Fprintf(&sb, "S3 = %d\n", p.S3)
-			fmt.Fprintf(&sb, "S4 = %d\n", p.S4)
-		}
+		fmt.Fprintf(&sb, "S3 = %d\n", p.S3)
+		fmt.Fprintf(&sb, "S4 = %d\n", p.S4)
 		fmt.Fprintf(&sb, "H1 = %d\n", p.H1)
 		fmt.Fprintf(&sb, "H2 = %d\n", p.H2)
 		fmt.Fprintf(&sb, "H3 = %d\n", p.H3)
 		fmt.Fprintf(&sb, "H4 = %d\n", p.H4)
+		if p.HeaderProtectionKey != "" {
+			fmt.Fprintf(&sb, "HeaderProtectionKey = %s\n", p.HeaderProtectionKey)
+		}
+		writeIfSet(&sb, "ContentPaddingAddition", p.ContentPaddingAddition)
+		writeIfSet(&sb, "RekeyAfterTime", p.RekeyAfterTime)
+		writeIfSet(&sb, "RekeyTimeout", p.RekeyTimeout)
+		writeIfSet(&sb, "RejectAfterTime", p.RejectAfterTime)
+		writeIfSet(&sb, "KeepaliveTimeout", p.KeepaliveTimeout)
+		writeIfSet(&sb, "MaxHandshakeAttempts", p.MaxHandshakeAttempts)
 	}
 
 	if client.ApplyISettings {
@@ -973,9 +1049,155 @@ func (m *Manager) GenerateClientConfig(serverID string, client *Client, includeC
 	fmt.Fprintf(&sb, "PresharedKey = %s\n", client.PresharedKey)
 	fmt.Fprintf(&sb, "Endpoint = %s:%d\n", endpoint, srv.Port)
 	fmt.Fprintf(&sb, "AllowedIPs = %s\n", allowedIPs)
-	fmt.Fprintf(&sb, "PersistentKeepalive = 25\n")
+	persistentKeepalive := "25"
+	if client.ObfuscationParams != nil && client.ObfuscationParams.PersistentKeepalive != "" {
+		persistentKeepalive = client.ObfuscationParams.PersistentKeepalive
+	}
+	fmt.Fprintf(&sb, "PersistentKeepalive = %s\n", persistentKeepalive)
 
 	return sb.String()
+}
+
+// GenerateAmneziaVpnURL builds a "vpn://" link in AmneziaVPN's own native
+// config format (base64 of the same JSON its app exports/imports).
+//
+// The official amnezia-client app's raw ".conf" importer
+// (ImportController::extractWireGuardConfig) always tags an imported AWG
+// config with the container string "amnezia-awg", which resolves to the
+// legacy DockerContainer::Awg (pre-3.0, no header protection) rather than
+// the current DockerContainer::Awg2 ("amnezia-awg2") - regardless of which
+// fields the .conf actually contains. That's why a client importing our
+// plain .conf shows the server as "AmneziaWG 2.0" and can fail to connect.
+// Emitting the native JSON directly with container="amnezia-awg2" and
+// protocol_version="3" sidesteps that importer entirely.
+func (m *Manager) GenerateAmneziaVpnURL(serverID string, client *Client) (string, error) {
+	srv := m.getServer(serverID)
+	if srv == nil {
+		return "", fmt.Errorf("server not found")
+	}
+
+	endpoint := srv.Endpoint
+	if endpoint == "" {
+		endpoint = srv.PublicIP
+	}
+	if endpoint == "" {
+		endpoint = m.PublicIP
+	}
+
+	subnetCidr := "24"
+	if parts := strings.SplitN(srv.Subnet, "/", 2); len(parts) > 1 {
+		subnetCidr = parts[1]
+	}
+
+	allowedIPs := client.AllowedIPs
+	if allowedIPs == "" {
+		allowedIPs = "0.0.0.0/0, ::/0"
+	}
+	var allowedIPList []string
+	for _, ip := range strings.Split(allowedIPs, ",") {
+		if ip = strings.TrimSpace(ip); ip != "" {
+			allowedIPList = append(allowedIPList, ip)
+		}
+	}
+
+	awgObj := map[string]interface{}{
+		"port":               fmt.Sprintf("%d", srv.Port),
+		"transport_proto":    "udp",
+		"protocol_version":   "3",
+		"subnet_address":     srv.ServerIP,
+		"subnet_cidr":        subnetCidr,
+		"isThirdPartyConfig": true,
+	}
+
+	persistentKeepalive := "25"
+	clientObj := map[string]interface{}{
+		"hostName":        endpoint,
+		"port":            srv.Port,
+		"client_ip":       client.ClientIP,
+		"client_priv_key": client.ClientPrivateKey,
+		"client_pub_key":  client.ClientPublicKey,
+		"server_pub_key":  srv.ServerPublicKey,
+		"psk_key":         client.PresharedKey,
+		"clientId":        client.ClientPublicKey,
+		"allowed_ips":     allowedIPList,
+		"mtu":             fmt.Sprintf("%d", srv.MTU),
+	}
+
+	if client.ObfuscationEnabled && client.ObfuscationParams != nil {
+		p := client.ObfuscationParams
+		for k, v := range map[string]string{
+			"Jc": fmt.Sprintf("%d", p.Jc), "Jmin": fmt.Sprintf("%d", p.Jmin), "Jmax": fmt.Sprintf("%d", p.Jmax),
+			"S1": fmt.Sprintf("%d", p.S1), "S2": fmt.Sprintf("%d", p.S2),
+			"S3": fmt.Sprintf("%d", p.S3), "S4": fmt.Sprintf("%d", p.S4),
+			"H1": fmt.Sprintf("%d", p.H1), "H2": fmt.Sprintf("%d", p.H2),
+			"H3": fmt.Sprintf("%d", p.H3), "H4": fmt.Sprintf("%d", p.H4),
+		} {
+			awgObj[k] = v
+			clientObj[k] = v
+		}
+		if p.HeaderProtectionKey != "" {
+			awgObj["HeaderProtectionKey"] = p.HeaderProtectionKey
+			clientObj["HeaderProtectionKey"] = p.HeaderProtectionKey
+		}
+		for k, v := range map[string]string{
+			"ContentPaddingAddition": p.ContentPaddingAddition,
+			"RekeyAfterTime":         p.RekeyAfterTime,
+			"RekeyTimeout":           p.RekeyTimeout,
+			"RejectAfterTime":        p.RejectAfterTime,
+			"KeepaliveTimeout":       p.KeepaliveTimeout,
+			"MaxHandshakeAttempts":   p.MaxHandshakeAttempts,
+		} {
+			if v != "" {
+				awgObj[k] = v
+				clientObj[k] = v
+			}
+		}
+		if p.PersistentKeepalive != "" {
+			persistentKeepalive = p.PersistentKeepalive
+		}
+	}
+	clientObj["persistent_keep_alive"] = persistentKeepalive
+
+	if client.ApplyISettings {
+		for n := 1; n <= 5; n++ {
+			if v := client.ISettings[fmt.Sprintf("i%d", n)]; v != "" {
+				iKey := fmt.Sprintf("I%d", n)
+				awgObj[iKey] = v
+				clientObj[iKey] = v
+			}
+		}
+	}
+
+	clientJSON, err := json.Marshal(clientObj)
+	if err != nil {
+		return "", err
+	}
+	awgObj["last_config"] = string(clientJSON)
+
+	root := map[string]interface{}{
+		"containers": []interface{}{
+			map[string]interface{}{
+				"container": "amnezia-awg2",
+				"awg":       awgObj,
+			},
+		},
+		"defaultContainer": "amnezia-awg2",
+		"description":      fmt.Sprintf("%s - %s", srv.Name, client.Name),
+		"hostName":         endpoint,
+	}
+	if len(srv.DNS) > 0 {
+		root["dns1"] = srv.DNS[0]
+		if len(srv.DNS) > 1 {
+			root["dns2"] = srv.DNS[1]
+		}
+	}
+
+	rootJSON, err := json.Marshal(root)
+	if err != nil {
+		return "", err
+	}
+
+	return "vpn://" + base64.RawURLEncoding.EncodeToString(rootJSON), nil
 }
 
 // UpdateClientAllowedIPs changes the AllowedIPs field for a client.

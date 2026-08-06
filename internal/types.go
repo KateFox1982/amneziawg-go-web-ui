@@ -32,6 +32,27 @@ type ObfuscationParams struct {
 	H3   int `json:"H3"`
 	H4   int `json:"H4"`
 	MTU  int `json:"MTU"`
+	// HeaderProtectionKey is a 32-byte base64-encoded key used by the
+	// AmneziaWG 3.0 header protection mechanism. Generated automatically
+	// whenever obfuscation is enabled, and must match byte-for-byte between
+	// server and client.
+	HeaderProtectionKey string `json:"HeaderProtectionKey,omitempty"`
+
+	// The following are optional AmneziaWG 3.0 "client-side" tuning knobs:
+	// each side of the tunnel applies them to its own behavior, so they do
+	// NOT need to match between server and client. All accept either a
+	// plain integer or an "a-b" range (e.g. "5-10"); empty means "use the
+	// engine default".
+	ContentPaddingAddition string `json:"ContentPaddingAddition,omitempty"`
+	RekeyAfterTime         string `json:"RekeyAfterTime,omitempty"`
+	RekeyTimeout           string `json:"RekeyTimeout,omitempty"`
+	RejectAfterTime        string `json:"RejectAfterTime,omitempty"`
+	KeepaliveTimeout       string `json:"KeepaliveTimeout,omitempty"`
+	MaxHandshakeAttempts   string `json:"MaxHandshakeAttempts,omitempty"`
+	// PersistentKeepalive overrides the hardcoded "25" written to client
+	// [Peer] sections; accepts a plain integer or "a-b" range. Empty means
+	// keep the default of 25.
+	PersistentKeepalive string `json:"PersistentKeepalive,omitempty"`
 }
 
 // Server holds a WireGuard server configuration.
@@ -51,7 +72,6 @@ type Server struct {
 	PublicIP           string             `json:"public_ip"`
 	Endpoint           string             `json:"endpoint"`
 	ObfuscationEnabled bool               `json:"obfuscation_enabled"`
-	AWG2Enabled        bool               `json:"awg2_enabled"`
 	ObfuscationParams  *ObfuscationParams `json:"obfuscation_params"`
 	AutoStart          bool               `json:"auto_start"`
 	DNS                []string           `json:"dns"`
@@ -76,7 +96,6 @@ type Client struct {
 	ObfuscationParams  *ObfuscationParams `json:"obfuscation_params"`
 	ApplyISettings     bool               `json:"apply_i_settings"`
 	ISettings          map[string]string  `json:"i_settings"`
-	AWG2Enabled        bool               `json:"awg2_enabled"`
 	AllowedIPs         string             `json:"allowed_ips"`
 	SuspendAt          *float64           `json:"suspend_at,omitempty"`
 }
@@ -91,7 +110,6 @@ type CreateServerRequest struct {
 	DNS               interface{}        `json:"dns"`
 	Obfuscation       *bool              `json:"obfuscation"`
 	ObfuscationParams *ObfuscationParams `json:"obfuscation_params"`
-	AWG2              bool               `json:"awg2"`
 	AutoStart         *bool              `json:"auto_start"`
 }
 

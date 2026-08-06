@@ -105,10 +105,7 @@
                     </div>
                     <div class="flex items-center">
                         <input type="checkbox" id="enableObfuscation" checked class="mr-2">
-                        <label class="text-sm font-medium text-gray-700">Enable Traffic Obfuscation</label>
-                        &nbsp; &nbsp;
-                        <input type="checkbox" id="enableAwg2" checked class="mr-2">
-                        <label class="text-sm font-medium text-gray-700">Enable AmneziaWG 2.0</label>
+                        <label class="text-sm font-medium text-gray-700">Enable Traffic Obfuscation (AmneziaWG 3.0)</label>
                     </div>
 
                     <!-- Obfuscation Parameters -->
@@ -137,13 +134,13 @@
                                 <label class="block text-xs font-medium text-gray-600">S2 (15-150)</label>
                                 <input type="number" id="paramS2" value="60" min="15" max="150" class="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1 text-sm">
                             </div>
-                            <div id="awg2FieldS3" style="display: none;">
-                                <label class="block text-xs font-medium text-gray-600">S3 (0-256)</label>
-                                <input type="number" id="paramS3" value="0" min="0" max="256" class="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1 text-sm">
+                            <div>
+                                <label class="block text-xs font-medium text-gray-600">S3 (12-256)</label>
+                                <input type="number" id="paramS3" value="20" min="12" max="256" class="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1 text-sm">
                             </div>
-                            <div id="awg2FieldS4" style="display: none;">
-                                <label class="block text-xs font-medium text-gray-600">S4 (0-32)</label>
-                                <input type="number" id="paramS4" value="0" min="0" max="32" class="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1 text-sm">
+                            <div>
+                                <label class="block text-xs font-medium text-gray-600">S4 (12-32)</label>
+                                <input type="number" id="paramS4" value="16" min="12" max="32" class="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1 text-sm">
                             </div>
                         </div>
                         <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mt-2">
@@ -167,6 +164,44 @@
                                 <button type="button" id="randomParamsBtn" class="mt-6 bg-gray-500 text-white px-3 py-1 rounded text-sm hover:bg-gray-600">
                                     Generate Random Parameters
                                 </button>
+                            </div>
+                        </div>
+                        <div id="awg3FieldHeaderProtectionKey" class="mt-2">
+                            <label class="block text-xs font-medium text-gray-600">HeaderProtectionKey (base64, leave empty to auto-generate)</label>
+                            <input type="text" id="paramHeaderProtectionKey" placeholder="auto-generated if left empty" class="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1 text-sm">
+                            <p class="text-xs text-gray-500 mt-1">AmneziaWG 3.0 requires S1-S4 &ge; 12 and this key to match byte-for-byte between server and every client config.</p>
+                        </div>
+                        <div id="awg3AdvancedFields" class="mt-2 border-t pt-2">
+                            <p class="text-xs text-gray-500 mb-2">Optional AWG 3.0 timing knobs (integer or "a-b" range, e.g. "5-10"). These are applied per-side and don't need to match between server and client; leave empty to use engine defaults (shown as placeholders below).</p>
+                            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600">ContentPaddingAddition</label>
+                                    <input type="text" id="paramContentPaddingAddition" placeholder="e.g. 0-64" class="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1 text-sm">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600">RekeyAfterTime</label>
+                                    <input type="text" id="paramRekeyAfterTime" placeholder="default: 120, e.g. 100-140" class="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1 text-sm">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600">RekeyTimeout</label>
+                                    <input type="text" id="paramRekeyTimeout" placeholder="default: 5, e.g. 4-7" class="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1 text-sm">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600">RejectAfterTime</label>
+                                    <input type="text" id="paramRejectAfterTime" placeholder="default: 180, e.g. 160-200" class="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1 text-sm">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600">KeepaliveTimeout</label>
+                                    <input type="text" id="paramKeepaliveTimeout" placeholder="default: 10, e.g. 8-12" class="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1 text-sm">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600">MaxHandshakeAttempts</label>
+                                    <input type="text" id="paramMaxHandshakeAttempts" placeholder="default: 18, e.g. 14-20" class="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1 text-sm">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600">PersistentKeepalive</label>
+                                    <input type="text" id="paramPersistentKeepalive" placeholder="default: 25, e.g. 22-30" class="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1 text-sm">
+                                </div>
                             </div>
                         </div>
                     </div>
