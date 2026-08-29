@@ -14,8 +14,13 @@ const (
 
 // AppConfig is the top-level config stored on disk.
 type AppConfig struct {
-	Servers []Server          `json:"servers"`
-	Clients map[string]Client `json:"clients"`
+	// SchemaVersion records which one-shot migrations have already been
+	// applied to this file, so they don't re-run on every start and undo a
+	// choice the operator made afterwards. A file written before this field
+	// existed unmarshals to 0.
+	SchemaVersion int               `json:"schema_version"`
+	Servers       []Server          `json:"servers"`
+	Clients       map[string]Client `json:"clients"`
 }
 
 // ObfuscationParams holds AmneziaWG obfuscation parameters.
@@ -53,6 +58,24 @@ type ObfuscationParams struct {
 	// [Peer] sections; accepts a plain integer or "a-b" range. Empty means
 	// keep the default of 25.
 	PersistentKeepalive string `json:"PersistentKeepalive,omitempty"`
+
+	// The following two are AmneziaWG 3.1 additions. Both are written into
+	// the server .conf and every client config from the same stored values,
+	// which keeps RandomTrailers - the one of the two that has to agree on
+	// both ends - in sync without any manual copying.
+
+	// RandomTrailers appends a random number of bytes to every packet, so a
+	// handshake no longer has a fixed on-the-wire length. The receiver only
+	// tolerates the extra bytes when it has the same flag on - a 3.0-era
+	// client (amnezia-client < 5.0.1.5, older amneziawg-android/apple) will
+	// silently drop the oversized handshake.
+	RandomTrailers bool `json:"RandomTrailers"`
+
+	// DisableCookies stops the interface from ever answering with a cookie
+	// reply, and disables under-load MAC2 verification altogether, removing
+	// the cookie exchange as a fingerprint. Purely local behavior, but it is
+	// written to both sides for consistency.
+	DisableCookies bool `json:"DisableCookies"`
 }
 
 // Server holds a WireGuard server configuration.

@@ -401,12 +401,12 @@ class AmneziaApp {
             errors.push(`S4 (${params.S4}) must be in range [0, 32]`);
         }
 
-        // Obfuscation is always AmneziaWG 3.0 header protection, which needs
+        // Obfuscation is always AmneziaWG 3.x header protection, which needs
         // S1-S4 >= 12: the cipher's 12-byte nonce is taken from the start of
         // the padding.
         for (const key of ['S1', 'S2', 'S3', 'S4']) {
             if ((params[key] ?? 0) < 12) {
-                errors.push(`${key} (${params[key]}) must be at least 12 for AmneziaWG 3.0 header protection`);
+                errors.push(`${key} (${params[key]}) must be at least 12 for AmneziaWG 3.x header protection`);
             }
         }
         const rangeRe = /^\d+(-\d+)?$/;
@@ -565,7 +565,7 @@ class AmneziaApp {
         console.log("Form data:", formData);
 
         // Add obfuscation parameters if enabled. Obfuscation is always the
-        // full AmneziaWG 3.0 parameter set now (1.0/1.5/2.0-only modes are
+        // full AmneziaWG 3.x parameter set now (1.0/1.5/2.0-only modes are
         // no longer supported).
         if (formData.obfuscation) {
             formData.obfuscation_params = {
@@ -581,6 +581,14 @@ class AmneziaApp {
                 H3: parseInt(this.getElement('paramH3')?.value || '3000'),
                 H4: parseInt(this.getElement('paramH4')?.value || '4000'),
             };
+
+            // AWG 3.1 packet-shaping switches. These are not per-side: the
+            // same values go into the server config and every client config,
+            // and a mismatch breaks the handshake.
+            formData.obfuscation_params.RandomTrailers =
+                this.getElement('paramRandomTrailers')?.checked ?? false;
+            formData.obfuscation_params.DisableCookies =
+                this.getElement('paramDisableCookies')?.checked ?? false;
 
             const headerKey = this.getElement('paramHeaderProtectionKey')?.value.trim();
             if (headerKey) {
@@ -1482,7 +1490,7 @@ class AmneziaApp {
                                 <h4 class="font-semibold text-sm text-gray-700 mb-2">Configuration</h4>
                                 <div class="space-y-1 text-sm">
                                     <div><span class="font-medium">Protocol:</span> ${serverInfo.protocol}</div>
-                                    <div><span class="font-medium">Obfuscation:</span> ${serverInfo.obfuscation_enabled ? 'Enabled (AmneziaWG 3.0)' : 'Disabled'}</div>
+                                    <div><span class="font-medium">Obfuscation:</span> ${serverInfo.obfuscation_enabled ? 'Enabled (AmneziaWG 3.1)' : 'Disabled'}</div>
                                     <div><span class="font-medium">Clients:</span> ${serverInfo.clients_count}</div>
                                     <div><span class="font-medium">DNS:</span> ${serverInfo.dns.join(', ')}</div>
                                     <div><span class="font-medium">MTU:</span> ${serverInfo.mtu}</div>
@@ -1500,7 +1508,7 @@ class AmneziaApp {
                                 ${Object.entries(serverInfo.obfuscation_params).map(([key, value]) => `
                                     <div class="text-center">
                                         <div class="font-medium">${key}</div>
-                                        <div class="font-mono">${value}</div>
+                                        <div class="font-mono">${typeof value === 'boolean' ? (value ? 'on' : 'off') : value}</div>
                                     </div>
                                 `).join('')}
                             </div>

@@ -11,12 +11,24 @@ RUN --mount=type=cache,id=awg_mod,target=/go/pkg/mod \
     --mount=type=cache,id=awg_build,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /app/api .
 
+# AmneziaWG upstream versions. Pinned to explicit release tags so a rebuild
+# can never silently pull a newer (or broken) master: bump these deliberately
+# and rebuild. Both must be from the same AmneziaWG generation - the tools
+# only know how to serialize the UAPI keys the matching engine understands.
+#   amneziawg-go    https://github.com/amnezia-vpn/amneziawg-go/tags
+#   amneziawg-tools https://github.com/amnezia-vpn/amneziawg-tools/tags
+ARG AWG_GO_VERSION=v3.1.20260828
+ARG AWG_TOOLS_VERSION=v3.1.20260812
+
 RUN --mount=type=cache,id=awg_mod,target=/go/pkg/mod \
     --mount=type=cache,id=awg_build,target=/root/.cache/go-build \
-     git clone https://github.com/amnezia-vpn/amneziawg-go.git && cd amneziawg-go && make && make install
+    git clone --depth 1 --branch "$AWG_GO_VERSION" https://github.com/amnezia-vpn/amneziawg-go.git \
+    && cd amneziawg-go && make && make install
+
 RUN  --mount=type=cache,id=awg_mod,target=/go/pkg/mod \
     --mount=type=cache,id=awg_build,target=/root/.cache/go-build \
-    git clone https://github.com/amnezia-vpn/amneziawg-tools.git && cd amneziawg-tools/src && make && make WITH_WGQUICK=yes install
+    git clone --depth 1 --branch "$AWG_TOOLS_VERSION" https://github.com/amnezia-vpn/amneziawg-tools.git \
+    && cd amneziawg-tools/src && make && make WITH_WGQUICK=yes install
 
 # ── Final image ───────────────────────────────────────────────────────────────
 FROM alpine:3.19

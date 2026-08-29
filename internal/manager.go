@@ -84,6 +84,7 @@ func NewManager() *Manager {
 
 	m.Config = m.loadConfig()
 	m.ensureDirectories()
+	m.migrateExistingServersToAwg31()
 	m.PublicIP = m.detectPublicIP()
 
 	if m.AutoStart {
@@ -176,14 +177,8 @@ func (m *Manager) loadConfig() *AppConfig {
 				if cfg.Servers[i].UnboundNATIPs == nil {
 					cfg.Servers[i].UnboundNATIPs = []string{}
 				}
-				// Migrate clients from srv.Clients into top-level map
-				// (needed for configs created before this field existed)
-				for _, client := range cfg.Servers[i].Clients {
-					if _, exists := cfg.Clients[client.ID]; !exists {
-						cfg.Clients[client.ID] = client
-					}
-				}
 			}
+			migrateLegacyClientMap(&cfg)
 			return &cfg
 		} else {
 			fmt.Printf("Error unmarshaling config: %v\n", err)
@@ -250,9 +245,9 @@ func randomBase64Key() string {
 // start of the padding, so anything smaller can't fit it.
 const awg3MinPadding = 12
 
-// generateObfuscationParams generates a full set of AmneziaWG 3.0 obfuscation
+// generateObfuscationParams generates a full set of AmneziaWG 3.1 obfuscation
 // parameters, including a header protection key. Obfuscation in this app is
-// always AmneziaWG 3.0 - there's no more separate 1.0/1.5/2.0 mode.
+// always AmneziaWG 3.x - there's no more separate 1.0/1.5/2.0 mode.
 func (m *Manager) generateObfuscationParams(mtu int) ObfuscationParams {
 	rng := rand.New(rand.NewSource(time.Now().UnixNano())) //nolint:gosec
 
@@ -291,6 +286,8 @@ func (m *Manager) generateObfuscationParams(mtu int) ObfuscationParams {
 		H4:                  rng.Intn(100001) + 300000,
 		MTU:                 mtu,
 		HeaderProtectionKey: randomBase64Key(),
+		RandomTrailers:      true,
+		DisableCookies:      true,
 	}
 }
 
@@ -338,6 +335,30 @@ func writeIfSet(sb *strings.Builder, key, value string) {
 	if value != "" {
 		fmt.Fprintf(sb, "%s = %s\n", key, value)
 	}
+}
+
+// writeAwgBoolIfOn writes an AmneziaWG 3.1 "key = on" line, and writes
+// nothing when the flag is off. amneziawg-tools accepts on/off and 0/1, but
+// an omitted key is the only form every pre-3.1 parser tolerates - clients
+// still on AmneziaWG 3.0 reject an unknown key outright and would fail to
+// import the config, so "off" is expressed by silence.
+func writeAwgBoolIfOn(sb *strings.Builder, key string, enabled bool) {
+	if enabled {
+		fmt.Fprintf(sb, "%s = on\n", key)
+	}
+}
+
+// awgProtocolVersion is the "protocol_version" value the AmneziaVPN app uses
+// for the AmneziaWG 3 generation (protocols::awg::awgV3 in amnezia-client).
+const awgProtocolVersion = "3.1"
+
+// awgBoolOrEmpty renders an AmneziaWG 3.1 toggle the way the AmneziaVPN app's
+// JSON expects it, or "" for off so the key can be dropped entirely.
+func awgBoolOrEmpty(enabled bool) string {
+	if enabled {
+		return "on"
+	}
+	return ""
 }
 
 func getServerIP(network string) string {
@@ -425,7 +446,7 @@ func (m *Manager) CreateServer(req CreateServerRequest) (*Server, error) {
 	}
 
 	// AmneziaWG 1.0/1.5/2.0-only modes are no longer supported: enabling
-	// obfuscation always means the full AmneziaWG 3.0 parameter set,
+	// obfuscation always means the full AmneziaWG 3.x parameter set,
 	// including mandatory header protection.
 	var obfParams *ObfuscationParams
 	if enableObfuscation {
@@ -481,6 +502,8 @@ func (m *Manager) CreateServer(req CreateServerRequest) (*Server, error) {
 		writeIfSet(&sb, "RejectAfterTime", obfParams.RejectAfterTime)
 		writeIfSet(&sb, "KeepaliveTimeout", obfParams.KeepaliveTimeout)
 		writeIfSet(&sb, "MaxHandshakeAttempts", obfParams.MaxHandshakeAttempts)
+		writeAwgBoolIfOn(&sb, "RandomTrailers", obfParams.RandomTrailers)
+		writeAwgBoolIfOn(&sb, "DisableCookies", obfParams.DisableCookies)
 	}
 
 	if err := os.WriteFile(configPath, []byte(sb.String()), 0o600); err != nil {
@@ -1026,6 +1049,8 @@ func (m *Manager) GenerateClientConfig(serverID string, client *Client, includeC
 		writeIfSet(&sb, "RejectAfterTime", p.RejectAfterTime)
 		writeIfSet(&sb, "KeepaliveTimeout", p.KeepaliveTimeout)
 		writeIfSet(&sb, "MaxHandshakeAttempts", p.MaxHandshakeAttempts)
+		writeAwgBoolIfOn(&sb, "RandomTrailers", p.RandomTrailers)
+		writeAwgBoolIfOn(&sb, "DisableCookies", p.DisableCookies)
 	}
 
 	if client.ApplyISettings {
@@ -1069,7 +1094,7 @@ func (m *Manager) GenerateClientConfig(serverID string, client *Client, includeC
 // fields the .conf actually contains. That's why a client importing our
 // plain .conf shows the server as "AmneziaWG 2.0" and can fail to connect.
 // Emitting the native JSON directly with container="amnezia-awg2" and
-// protocol_version="3" sidesteps that importer entirely.
+// protocol_version="3.1" sidesteps that importer entirely.
 func (m *Manager) GenerateAmneziaVpnURL(serverID string, client *Client) (string, error) {
 	srv := m.getServer(serverID)
 	if srv == nil {
@@ -1101,9 +1126,14 @@ func (m *Manager) GenerateAmneziaVpnURL(serverID string, client *Client) (string
 	}
 
 	awgObj := map[string]interface{}{
-		"port":               fmt.Sprintf("%d", srv.Port),
-		"transport_proto":    "udp",
-		"protocol_version":   "3",
+		"port":            fmt.Sprintf("%d", srv.Port),
+		"transport_proto": "udp",
+		// The app compares this against its own protocols::awg::awgV3
+		// constant, which is the literal string "3.1" in every release that
+		// knows about AmneziaWG 3 (5.0.1.5 onwards; no shipped client ever
+		// used a bare "3"). A mismatch makes the app render the server with
+		// the pre-3.0 settings page and flag it as an outdated container.
+		"protocol_version":   awgProtocolVersion,
 		"subnet_address":     srv.ServerIP,
 		"subnet_cidr":        subnetCidr,
 		"isThirdPartyConfig": true,
@@ -1146,6 +1176,11 @@ func (m *Manager) GenerateAmneziaVpnURL(serverID string, client *Client) (string
 			"RejectAfterTime":        p.RejectAfterTime,
 			"KeepaliveTimeout":       p.KeepaliveTimeout,
 			"MaxHandshakeAttempts":   p.MaxHandshakeAttempts,
+			// The app stores these as the strings "on"/"off" (awgBoolOn /
+			// awgBoolOff) and treats an absent key as off, so only the "on"
+			// case needs to travel.
+			"RandomTrailers": awgBoolOrEmpty(p.RandomTrailers),
+			"DisableCookies": awgBoolOrEmpty(p.DisableCookies),
 		} {
 			if v != "" {
 				awgObj[k] = v

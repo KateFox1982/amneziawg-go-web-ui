@@ -105,7 +105,7 @@
                     </div>
                     <div class="flex items-center">
                         <input type="checkbox" id="enableObfuscation" checked class="mr-2">
-                        <label class="text-sm font-medium text-gray-700">Enable Traffic Obfuscation (AmneziaWG 3.0)</label>
+                        <label class="text-sm font-medium text-gray-700">Enable Traffic Obfuscation (AmneziaWG 3.1)</label>
                     </div>
 
                     <!-- Obfuscation Parameters -->
@@ -166,13 +166,24 @@
                                 </button>
                             </div>
                         </div>
+                        <div id="awg31Toggles" class="mt-2 border-t pt-2">
+                            <p class="text-xs text-gray-500 mb-2">AmneziaWG 3.1 packet shaping. Unlike the timing knobs below, both switches are written identically into the server config and every client config &mdash; the two sides must agree, so turn them off if any of your clients is older than AmneziaWG 3.1 (AmneziaVPN &lt; 5.0.1.5).</p>
+                            <div class="flex items-center">
+                                <input type="checkbox" id="paramRandomTrailers" checked class="mr-2">
+                                <label for="paramRandomTrailers" class="text-xs font-medium text-gray-600">RandomTrailers &mdash; append a random number of bytes to every packet, so handshakes lose their fixed on-the-wire length</label>
+                            </div>
+                            <div class="flex items-center mt-1">
+                                <input type="checkbox" id="paramDisableCookies" checked class="mr-2">
+                                <label for="paramDisableCookies" class="text-xs font-medium text-gray-600">DisableCookies &mdash; never send cookie replies and skip under-load MAC2 checks, removing the cookie exchange as a fingerprint</label>
+                            </div>
+                        </div>
                         <div id="awg3FieldHeaderProtectionKey" class="mt-2">
                             <label class="block text-xs font-medium text-gray-600">HeaderProtectionKey (base64, leave empty to auto-generate)</label>
                             <input type="text" id="paramHeaderProtectionKey" placeholder="auto-generated if left empty" class="mt-1 block w-full border border-gray-300 rounded-md px-2 py-1 text-sm">
-                            <p class="text-xs text-gray-500 mt-1">AmneziaWG 3.0 requires S1-S4 &ge; 12 and this key to match byte-for-byte between server and every client config.</p>
+                            <p class="text-xs text-gray-500 mt-1">AmneziaWG 3.x requires S1-S4 &ge; 12 and this key to match byte-for-byte between server and every client config.</p>
                         </div>
                         <div id="awg3AdvancedFields" class="mt-2 border-t pt-2">
-                            <p class="text-xs text-gray-500 mb-2">Optional AWG 3.0 timing knobs (integer or "a-b" range, e.g. "5-10"). These are applied per-side and don't need to match between server and client; leave empty to use engine defaults (shown as placeholders below).</p>
+                            <p class="text-xs text-gray-500 mb-2">Optional AWG 3.x timing knobs (integer or "a-b" range, e.g. "5-10"). These are applied per-side and don't need to match between server and client; leave empty to use engine defaults (shown as placeholders below).</p>
                             <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                                 <div>
                                     <label class="block text-xs font-medium text-gray-600">ContentPaddingAddition</label>
