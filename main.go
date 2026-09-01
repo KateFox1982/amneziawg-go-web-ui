@@ -21,10 +21,15 @@ import (
 	"github.com/gofiber/fiber/v3/middleware/static"
 
 	"amneziawg-web-ui/internal"
-	"amneziawg-web-ui/web-ui/wasm"
 )
 
-const socketIOPath = "/socket.io"
+const (
+	socketIOPath = "/socket.io"
+
+	// staticDir is where "make web-ui" leaves the packaged frontend, relative
+	// to the working directory the server is started from.
+	staticDir = "./web-ui/wasm"
+)
 
 func main() {
 	fmt.Println("AmneziaWG Web UI (Go/Fiber) starting...")
@@ -84,29 +89,29 @@ func main() {
 	h := internal.NewHandlers(mgr, hub)
 	h.RegisterRoutes(app)
 
-	// Everything else is the embedded frontend: the loader page, the wasm
-	// bundle and its assets. The files are embedded by the web-ui module
-	// itself - go:embed cannot reach across a module boundary - and reach us
-	// through the replace directive in go.mod.
-	//
-	// That embed covers the package directory, so the wrapper's own source
-	// is in there too; nobody has any business fetching it.
-	app.Get("/dist.go", func(fiber.Ctx) error { return fiber.ErrNotFound })
+	// Everything else is the frontend, served straight off disk: the loader
+	// page, the wasm bundle and its assets, exactly as "fyne package -os wasm"
+	// wrote them. Nothing is baked into the binary, so the bundle can be
+	// swapped without relinking the server - it is looked up relative to the
+	// working directory, which is the repository root in development and /app
+	// in the container (see the WORKDIR in the Dockerfile).
+	frontend := os.DirFS(staticDir)
 
-	app.Use(frontendCache(wasm.FS(), "."))
+	app.Use(frontendCache(frontend, "."))
 	app.Get("/*", static.New("", static.Config{
-		FS:         wasm.FS(),
+		FS:         frontend,
 		IndexNames: []string{"index.html"},
 		Browse:     false,
 	}))
 
 	port := webUIPort()
+	fmt.Printf("Serving the frontend from %s\n", staticDir)
 	fmt.Printf("Listening on :%d\n", port)
 	log.Fatal(app.Listen(":" + strconv.Itoa(port)))
 }
 
-// frontendCache makes the browser revalidate the embedded frontend instead of
-// caching it blindly. The file names are the same in every release, so
+// frontendCache makes the browser revalidate the frontend instead of caching
+// it blindly. The file names are the same in every release, so
 // without a content-derived validator a browser would happily keep running
 // the previous bundle after an upgrade - and re-downloading ~50 MB of wasm on
 // every page load is not an acceptable alternative.
@@ -144,12 +149,12 @@ func frontendCache(files fs.FS, root string) fiber.Handler {
 			return c.SendStatus(fiber.StatusNotModified)
 		}
 
-		// go:embed stamps every file with the zero time, and the static
-		// handler below answers any If-Modified-Since at or after it with a
-		// 304 - which is every conditional request a browser will ever make,
-		// upgraded bundle or not. The content hash is the only validator worth
-		// anything here, so the modification time is dropped from both ends of
-		// the exchange rather than left to contradict it.
+		// The content hash is the only validator worth trusting here: a
+		// modification time survives a copy (docker COPY, rsync -a) that
+		// replaces the file contents, and the static handler below would
+		// answer such an If-Modified-Since with a 304 over a bundle the
+		// browser has never seen. So the timestamp is dropped from both ends
+		// of the exchange rather than left to contradict the hash.
 		c.Request().Header.Del(fiber.HeaderIfModifiedSince)
 		err := c.Next()
 		c.Response().Header.Del(fiber.HeaderLastModified)
@@ -183,7 +188,7 @@ func fileETag(files fs.FS, name string) (string, error) {
 		return "", err
 	}
 
-	// Weak on purpose. The tag hashes the file as embedded, while what goes
+	// Weak on purpose. The tag hashes the file as it sits on disk, while what goes
 	// on the wire is usually gzipped - a difference a strong tag is not
 	// allowed to gloss over. It also keeps the compression middleware from
 	// replacing the tag with a hash of the compressed body: that one changes

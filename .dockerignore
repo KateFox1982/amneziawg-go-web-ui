@@ -1,6 +1,5 @@
 # Build artefacts that the image rebuilds from source anyway.
-web-ui/wasm/*
-!web-ui/wasm/dist.go
+web-ui/wasm/
 *.bin
 *.tar
 

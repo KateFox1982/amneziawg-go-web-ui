@@ -3,5 +3,4 @@
 *.bin
 *.tar
 Makefile.nerdctl
-/web-ui/wasm/*
-!/web-ui/wasm/dist.go
+/web-ui/wasm/

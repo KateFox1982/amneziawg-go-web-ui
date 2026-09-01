@@ -32,11 +32,9 @@ WASM_NAME = bundle
 # out here.
 GO_BUILD_FLAGS = -trimpath -ldflags="-s -w"
 
-# Where "fyne package" writes its output. The go:embed wrapper lives right in
-# that directory (web-ui/wasm/dist.go), so nothing needs copying: the server
-# imports the package and gets the loader page, its light and dark
-# stylesheets, the spinners, wasm_exec.js and the bundle itself. Everything
-# there except dist.go is generated, and gitignored.
+# Where "fyne package" writes its output: the loader page, its light and dark
+# stylesheets, the spinners, wasm_exec.js and the bundle itself. Everything in there is
+# generated, and gitignored.
 WASM_DIR = web-ui/wasm
 
 .PHONY: web-ui
@@ -44,9 +42,9 @@ web-ui: check-go web-ui-clean ## Build the Fyne WebAssembly frontend into web-ui
 	cd web-ui && go tool fyne package -os wasm --name $(WASM_NAME) --release
 
 .PHONY: web-ui-clean
-web-ui-clean: ## Remove the built frontend bundle, keeping the embed wrapper
+web-ui-clean: ## Remove the built frontend bundle
+	rm -rf $(WASM_DIR)
 	mkdir -p $(WASM_DIR)
-	find $(WASM_DIR) -mindepth 1 ! -name dist.go -delete
 
 ##@ Backend
 
@@ -55,11 +53,11 @@ run: ## Build image from sources and run via docker-compose
 	docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
 
 .PHONY: build
-build: web-ui ## Build the frontend bundle and the server binary that embeds it
+build: web-ui ## Build the frontend bundle and the server binary that serves it
 	go build $(GO_BUILD_FLAGS) -o server.bin .
 
 .PHONY: build-server
-build-server: check-go ## Build only the server, reusing the bundle already in web-ui/wasm
+build-server: check-go ## Build only the server; it serves the bundle already in web-ui/wasm
 	go build $(GO_BUILD_FLAGS) -o server.bin .
 
 .PHONY: exec

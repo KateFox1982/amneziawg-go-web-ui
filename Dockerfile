@@ -12,8 +12,7 @@ COPY . .
 
 # The frontend is a Fyne application compiled to WebAssembly. "fyne package"
 # emits the loader page, its stylesheets and the bundle straight into
-# web-ui/wasm, which is the directory the web-ui/wasm package embeds and the
-# server imports - no copying involved.
+# web-ui/wasm
 RUN --mount=type=cache,id=awg_mod,target=/go/pkg/mod \
     --mount=type=cache,id=awg_build,target=/root/.cache/go-build \
     cd web-ui && go tool fyne package -os wasm --name bundle --release
@@ -60,9 +59,13 @@ COPY --from=builder /usr/bin/amneziawg-go /usr/bin/proxy
 COPY --from=builder /usr/bin/awg /usr/bin/awg
 COPY --from=builder /usr/bin/awg-quick /usr/bin/awg-quick
 COPY --from=builder /app/api /usr/bin/api
+COPY --from=builder /build/web-ui/wasm/ /app/web-ui/wasm/
 
 COPY scripts/ /app/scripts/
 RUN chmod +x /app/scripts/*.sh
+
+# The api binary resolves ./web-ui/wasm from here.
+WORKDIR /app
 
 ENV WEB_UI_PORT=80
 # awg-quick launches the userspace WireGuard implementation via this env var

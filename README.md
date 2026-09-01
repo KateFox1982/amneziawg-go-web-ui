@@ -99,7 +99,7 @@ are absent from their stored parameters, and an absent flag means off.
 
 **Go/Fiber Backend** (`main.go`, `internal/`)
 
-*   `main.go` — wires up the Fiber app, embeds the frontend, sets up basic auth and Socket.IO, and starts listening on `WEB_UI_PORT`
+*   `main.go` — wires up the Fiber app, serves the frontend off disk from `./web-ui/wasm`, sets up basic auth and Socket.IO, and starts listening on `WEB_UI_PORT`
 *   `internal/handlers.go` — REST API route handlers
 *   `internal/manager.go` — business logic: server/client lifecycle, AmneziaWG config file generation (including all AmneziaWG 3.x parameters), iptables, key generation
 *   `internal/migrations.go` — one-shot startup migrations that bring an older `web_config.json` (and the server `.conf` files it points at) up to the current schema
@@ -109,7 +109,7 @@ are absent from their stored parameters, and an absent flag means off.
 
 **Fyne Frontend** (`web-ui/`, its own Go module)
 
-*   A [Fyne](https://fyne.io) application compiled to WebAssembly — no JavaScript framework, no npm; `make web-ui` packages it into `web-ui/wasm`, which the `web-ui/wasm` package embeds via `go:embed` and the server imports
+*   A [Fyne](https://fyne.io) application compiled to WebAssembly — no JavaScript framework, no npm; `make web-ui` packages it into `web-ui/wasm`, which the server serves straight off disk — nothing is embedded into the binary, so the bundle can be replaced without relinking
 *   A single dark theme, forced in the app itself; the loading page is the one `fyne package` generates, with Fyne's own dark stylesheet
 *   Real-time status and traffic updates over Socket.IO, using the Go client (`github.com/zishang520/socket.io/clients/socket/v3`) pinned to the HTTP long-polling transport, since a wasm build has no TCP stack for websockets; REST polling takes over whenever the socket is down
 *   `web-ui/api` holds every request/response and event struct. The backend imports the same package through a `replace` directive, so the two sides cannot drift apart
@@ -119,7 +119,7 @@ are absent from their stored parameters, and an absent flag means off.
 
 ```
 .
-├── main.go                    # Entry point, Fiber app, serves the embedded frontend
+├── main.go                    # Entry point, Fiber app, serves the frontend off disk
 ├── internal/
 │   ├── handlers.go            # REST API route handlers
 │   ├── manager.go             # Server/client lifecycle & AmneziaWG config generation
@@ -128,7 +128,7 @@ are absent from their stored parameters, and an absent flag means off.
 │   └── ws.go                  # Socket.IO hub
 ├── web-ui/                    # Fyne frontend, a separate Go module
 │   ├── api/types.go           # Wire types shared with the backend (via replace)
-│   ├── wasm/dist.go           # go:embed wrapper; the bundle is packaged next to it
+│   ├── wasm/                  # "fyne package" output: loader page + bundle (generated)
 │   ├── main.go                # App entry: dark theme, window, lifecycle
 │   └── internal/ui/           # The application itself
 │       ├── ui.go              # Layout, polling, shared widgets

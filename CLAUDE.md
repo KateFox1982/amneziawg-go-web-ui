@@ -16,7 +16,7 @@ root module via a `replace` directive - add new request/response structs
 there, never twice.
 
 Build the bundle with `make web-ui`; it lands in `web-ui/wasm`, which the
-`web-ui/wasm` package embeds and the server imports.
+server serves straight off disk under the relative path `./web-ui/wasm`
 
 # Running the project, and check docker build
 
