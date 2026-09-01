@@ -1,251 +1,181 @@
 # AmneziaWG Web UI
 
-Самостоятельно размещаемая веб-панель управления **AmneziaWG** —
-обфусцированным, устойчивым к DPI форком WireGuard. Это один бинарник на
-Go/Fiber: создавайте несколько серверов AmneziaWG, управляйте их клиентами
-и следите за трафиком из одного веб-интерфейса, где **AmneziaWG 3.1
-(header protection + random trailers) — встроенный и всегда включённый режим
-обфускации**.
+A self-hosted web management panel for **AmneziaWG** — the obfuscated,
+DPI-resistant fork of WireGuard — written as a single Go/Fiber binary. Create,
+manage and monitor multiple AmneziaWG VPN servers and their clients from one
+web interface, with **AmneziaWG 3.1 (header protection + random trailers) as
+the built-in, always-on obfuscation mode**.
 
-Вся настройка сервера выполняется через веб-интерфейс или REST API.
-Переменные окружения при старте контейнера задают в основном лишь
-*значения по умолчанию* — почти всё можно переопределить для каждого запроса
-и каждого сервера через UI или API, кроме `WEB_UI_PORT`.
+All server configuration is done via the web interface or the REST API.
+Environment variables at container startup mostly just provide *defaults* —
+almost everything can be overridden per-request/per-server through the UI or
+the API, except `WEB_UI_PORT`.
 
-<p align="center">
-  <img src="screenshot2.png" alt="Список серверов: два сервера AmneziaWG со своими клиентами" width="92%"/>
-</p>
-<p align="center">
-  <img src="screenshot.png" alt="Форма создания VPN-сервера с параметрами обфускации AmneziaWG 3.1" width="62%"/>
-</p>
+<img src="screenshot2.png" alt="Web UI screenshot" width="50%"/>
+<img src="screenshot.png" alt="Web UI screenshot" width="50%"/>
 
-## 🔒 AmneziaWG 3.1 — главное
+## 🔒 AmneziaWG 3.1, front and center
 
-Это ключевая особенность проекта: **каждый созданный здесь сервер использует
-полный набор параметров AmneziaWG 3.x** — устаревшего режима «базовой
-обфускации» 1.0/1.5/2.0 больше нет, включать или выключать нечего, он
-всегда активен.
+This is the headline feature of the project: **every server created here
+uses the full AmneziaWG 3.x parameter set** — there's no legacy 1.0/1.5/2.0
+"basic obfuscation" mode to opt into or out of, it's just always on.
 
-AmneziaWG 3.0 добавляет **защиту заголовков (header protection)** поверх
-обфускации мусорными пакетами и паддингом, которая была в предыдущих
-поколениях AmneziaWG: 16-байтный заголовок пакета WireGuard (тип сообщения,
-индекс получателя, счётчик) — та часть, что оставалась открытой даже при
-обфускации 1.0/1.5/2.0 — шифруется ChaCha20 ключом (`HeaderProtectionKey`),
-общим для сервера и клиента. Это убирает одну из последних
-низкоэнтропийных, удобных для DPI сигнатур, которую оставляют в канале
-протоколы на базе WireGuard.
+AmneziaWG 3.0 adds **header protection** on top of the junk-packet/padding
+obfuscation that earlier AmneziaWG generations already had: the 16-byte
+WireGuard packet header (message type, receiver index, counter) — the part
+that was still visible in plaintext even with 1.0/1.5/2.0 obfuscation — gets
+encrypted with ChaCha20 using a key (`HeaderProtectionKey`) shared between
+server and client. This removes one of the last low-entropy, DPI-friendly
+signatures WireGuard-based protocols leave on the wire.
 
-Что приложение делает за вас автоматически:
+What this app does for you automatically:
 
-*   Генерирует свежий случайный 32-байтный `HeaderProtectionKey` для каждого
-    нового сервера (если вы не задали свой).
-*   Соблюдает единственное жёсткое требование протокола: значения паддинга
-    `S1`-`S4` должны быть **≥ 12 байт**, потому что 12-байтный nonce шифра
-    защиты заголовков берётся из начала этого паддинга. Приложение проверяет
-    это на стороне сервера и отказывается создавать сервер с нарушением.
-*   Держит `HeaderProtectionKey` и все параметры обфускации
-    синхронизированными между сервером и каждым сгенерированным клиентским
-    конфигом — переносить их руками не нужно.
-*   Включает оба переключателя формирования пакетов AmneziaWG 3.1,
-    `RandomTrailers` и `DisableCookies`, для каждого нового сервера и
-    записывает их в соответствующие клиентские конфиги (см. ниже — эти два
-    параметра должны совпадать на обеих сторонах).
-*   Даёт доступ к новым необязательным «клиентским» тайминг-параметрам
-    AmneziaWG 3.0 (`ContentPaddingAddition`, `RekeyAfterTime`,
-    `RekeyTimeout`, `RejectAfterTime`, `KeepaliveTimeout`,
-    `MaxHandshakeAttempts`, `PersistentKeepalive`), чтобы вносить джиттер в
-    тайминги рукопожатия и keepalive и в паддинг содержимого — иначе это
-    постоянные и предсказуемые таймеры WireGuard. Полный справочник,
-    значения движка по умолчанию и рекомендуемые диапазоны — в разделе
-    [Параметры обфускации](#-параметры-обфускации).
+*   Generates a fresh, random 32-byte `HeaderProtectionKey` for every new
+    server (unless you supply your own).
+*   Enforces the one hard protocol requirement: `S1`-`S4` padding values must
+    all be **≥ 12 bytes**, because the header-protection cipher's 12-byte
+    nonce is taken from the start of that padding. The app validates this
+    server-side and refuses to create a server that violates it.
+*   Keeps the `HeaderProtectionKey` and all obfuscation parameters in sync
+    between the server and every client config it generates for you — you
+    never have to copy it around by hand.
+*   Turns on both AmneziaWG 3.1 packet-shaping switches, `RandomTrailers`
+    and `DisableCookies`, for every new server, and writes them into the
+    matching client configs (see below — these two must agree on both ends).
+*   Also exposes AmneziaWG 3.0's newer, optional "client-side" timing knobs
+    (`ContentPaddingAddition`, `RekeyAfterTime`, `RekeyTimeout`,
+    `RejectAfterTime`, `KeepaliveTimeout`, `MaxHandshakeAttempts`,
+    `PersistentKeepalive`) so you can jitter handshake/keepalive timing and
+    content padding, which are otherwise constant, predictable WireGuard
+    timers. See [Obfuscation Parameters](#-obfuscation-parameters) below for
+    the full reference, engine defaults and suggested ranges.
 
-### Что добавляет AmneziaWG 3.1
+### What AmneziaWG 3.1 adds
 
-3.1 — небольшой дополняющий релиз поверх 3.0: два новых переключателя в
-секции `[Interface]`, существующие параметры не менялись:
+3.1 is a small, additive release on top of 3.0 — two new `[Interface]`
+switches, no changes to the existing parameters:
 
-*   **`RandomTrailers`** — добавляет случайное число байт в конец каждого
-    пакета, ориентируясь на «UDP-окно» пира, которое движок выводит из уже
-    прошедшего трафика. Сообщения рукопожатия, длина которых была
-    фиксированной и потому отпечатываемой даже в 3.0, больше не имеют
-    постоянного размера в канале.
-*   **`DisableCookies`** — интерфейс никогда не отвечает cookie reply и
-    полностью пропускает проверку MAC2 под нагрузкой, так что обмен cookie
-    исчезает как сигнатура (и как поверхность для отражённых атак).
+*   **`RandomTrailers`** — appends a random number of bytes to the end of
+    every packet, sized against a per-peer "UDP window" the engine learns
+    from the traffic it has already seen. Handshake messages, whose length
+    was fixed and therefore fingerprintable even under 3.0, no longer have a
+    constant on-the-wire size.
+*   **`DisableCookies`** — the interface never answers with a cookie reply
+    and skips under-load MAC2 verification entirely, so the cookie exchange
+    disappears as a signature (and as a reflection surface).
 
-**`RandomTrailers` — единственная настройка обфускации, которая обязана
-совпадать на обеих сторонах.** Получатель принимает удлинённое рукопожатие
-только если флаг включён у него самого, поэтому при несовпадении все
-рукопожатия падают — молча, так как пакет просто не подходит ни под одну
-известную форму и отбрасывается без записи в лог. `DisableCookies`, хотя и
-идёт рядом, чисто локальный: движок читает его ровно в одном месте — в
-ветке «под нагрузкой» на принимающей стороне, — поэтому его можно включить
-на сервере, не трогая клиентов.
+**`RandomTrailers` is the one obfuscation setting that must match on both
+ends.** A receiver only accepts an over-long handshake when it has the flag
+on itself, so a mismatch makes every handshake fail — silently, since the
+packet just doesn't match any known shape and gets dropped without a log
+line. `DisableCookies`, despite travelling alongside it, is purely local:
+the engine reads it in exactly one place, the under-load branch on the
+receiving side, so you can turn it on for a server without touching any
+client.
 
-Приложение пишет оба флага из одних и тех же сохранённых значений в конфиг
-сервера, в каждый клиентский `.conf` и в ссылку `vpn://`, так что они
-остаются согласованными — но клиент старше AmneziaWG 3.1
-(AmneziaVPN < 5.0.1.5) этих ключей вообще не знает. Снимите обе галочки в
-форме создания сервера, если нужно поддержать такие клиенты. Существующих
-серверов это не касается: в их сохранённых параметрах флагов нет, а
-отсутствие флага означает «выключено».
+This app writes both flags from the same stored values into the server
+`.conf`, every client `.conf` and the `vpn://` link, so they stay in sync —
+but a client older than AmneziaWG 3.1 (AmneziaVPN < 5.0.1.5) doesn't know
+the keys at all. Untick the two switches in the create-server form if you
+need to support such clients. Existing servers are unaffected: the flags
+are absent from their stored parameters, and an absent flag means off.
 
-## 🚀 Возможности
+## 🚀 Features
 
-*   **Управление через веб**: понятный интерфейс для управления VPN-серверами и клиентами
-*   **AmneziaWG 3.1 по умолчанию**: защита заголовков, random trailers, отключённые cookies, мусорные пакеты, паддинг сообщений и обфускация заголовков всегда полностью настроены — см. выше
-*   **Управление клиентами**: генерация и скачивание клиентских конфигов, приостановка и повторная активация клиента на работающем сервере, автоматическая приостановка по времени
-*   **Мониторинг в реальном времени**: статус сервера, трафик и подключения по Socket.IO
-*   **Автозапуск**: автоматический старт серверов при перезапуске контейнера
-*   **Автоматизация iptables**: настройка правил файрвола без ручной работы
-*   **Свои значения**: MTU, подсеть, порт, DNS, endpoint и любой параметр обфускации AmneziaWG 3.x настраиваются для каждого сервера
-*   **QR-код**: клиентский конфиг можно посмотреть, скопировать и скачать как текст, файл `.conf` или QR-код
-*   **Нативная ссылка AmneziaVPN**: экспорт конфига клиента в виде ссылки `vpn://…`, которую официальное приложение распознаёт именно как AmneziaWG 3.x
-*   **Просмотр конфигов**: конфиги и серверов, и клиентов открываются прямо из UI
-*   **Данные клиента**: трафик, последнее рукопожатие и IP endpoint отображаются и автоматически обновляются
+*   **Web-based Management**: Intuitive UI for managing VPN servers and clients
+*   **AmneziaWG 3.1 by default**: header protection, random trailers, disabled cookies, junk packets, message padding and header obfuscation are always fully configured — see above
+*   **Client Management**: Generate and download client configurations. Suspend and reactivate clients on a live server.
+*   **Real-time Monitoring**: Live server status, traffic and connection monitoring over Socket.IO
+*   **Auto-start**: Automatic server startup on container restart
+*   **IPTables Automation**: Automatic firewall configuration
+*   **Custom values**: MTU, subnet, port, DNS and every AmneziaWG 3.x obfuscation parameter can be customized per server
+*   **QR code**: Client configs can be viewed, copied and downloaded as text, `.conf` file or QR code
+*   **Config view**: Both servers' and clients' configs can be viewed directly from the UI
+*   **Client data**: Clients' traffic, last handshake and endpoint IP are displayed and auto-refreshed
 
-## 🏗️ Архитектура
+## 🏗️ Architecture
 
-### Компоненты
+### Components
 
-**Бэкенд на Go/Fiber** (`main.go`, `internal/`)
+**Go/Fiber Backend** (`main.go`, `internal/`)
 
-*   `main.go` — собирает приложение Fiber, отдаёт фронтенд с диска из
-    `./web-ui/wasm`, поднимает basic auth и Socket.IO и слушает `WEB_UI_PORT`.
-    Здесь же ETag-валидаторы для файлов фронтенда (чтобы браузер не крутил
-    старый бандл после обновления и не качал заново ~50 МБ wasm при каждой
-    загрузке) и сжатие ответов, отключённое для Socket.IO
-*   `internal/handlers.go` — обработчики маршрутов REST API
-*   `internal/manager.go` — бизнес-логика: жизненный цикл серверов и
-    клиентов, генерация конфигов AmneziaWG (включая все параметры
-    AmneziaWG 3.x), iptables, генерация ключей
-*   `internal/migrations.go` — однократные стартовые миграции, приводящие
-    старый `web_config.json` (и файлы `.conf`, на которые он ссылается) к
-    текущей схеме
-*   `internal/types.go` — конфиг на диске плюс алиасы к общим wire-типам из
-    `web-ui/api`
-*   `internal/ws.go` — хаб Socket.IO, периодическая рассылка трафика
-*   Ни reverse proxy, ни супервизора: единственный скомпилированный бинарник
-    (`/usr/bin/api` в контейнере) делает всё, а
-    [`tini`](https://github.com/krallin/tini) работает как PID 1 только для
-    того, чтобы подбирать осиротевшие дочерние процессы
+*   `main.go` — wires up the Fiber app, serves the frontend off disk from `./web-ui/wasm`, sets up basic auth and Socket.IO, and starts listening on `WEB_UI_PORT`
+*   `internal/handlers.go` — REST API route handlers
+*   `internal/manager.go` — business logic: server/client lifecycle, AmneziaWG config file generation (including all AmneziaWG 3.x parameters), iptables, key generation
+*   `internal/migrations.go` — one-shot startup migrations that bring an older `web_config.json` (and the server `.conf` files it points at) up to the current schema
+*   `internal/types.go` — on-disk config plus aliases to the shared wire types in `web-ui/api`
+*   `internal/ws.go` — Socket.IO hub, periodic traffic broadcasts
+*   No reverse proxy, no supervisor: the single compiled binary (`/usr/bin/api` in the container) does everything, with [`tini`](https://github.com/krallin/tini) as PID 1 just to reap orphaned child processes
 
-**Фронтенд на Fyne** (`web-ui/`, отдельный Go-модуль)
+**Fyne Frontend** (`web-ui/`, its own Go module)
 
-*   Приложение [Fyne](https://fyne.io), скомпилированное в WebAssembly — без
-    JavaScript-фреймворков и без npm; `make web-ui` пакует его в
-    `web-ui/wasm`, откуда сервер отдаёт файлы прямо с диска — в бинарник
-    ничего не встраивается, поэтому бандл можно заменить без пересборки
-    сервера
-*   Единственная тёмная тема, принудительно заданная в самом приложении;
-    страница загрузки — та, что генерирует `fyne package`, со стандартной
-    тёмной стилизацией Fyne
-*   Обновления статуса и трафика в реальном времени по Socket.IO через
-    Go-клиент (`github.com/zishang520/socket.io/clients/socket/v3`),
-    закреплённый на транспорте HTTP long-polling, так как у wasm-сборки нет
-    TCP-стека для websockets; когда сокет недоступен, работу берёт на себя
-    опрос REST
-*   В `web-ui/api` лежат все структуры запросов, ответов и событий. Бэкенд
-    импортирует тот же пакет через директиву `replace`, поэтому две стороны
-    не могут разойтись
-*   Валидация форм на клиенте повторяет серверные правила для параметров
-    AmneziaWG 3.x (S1-S4 ≥ 12, границы Jmin/Jmax и т. д.)
+*   A [Fyne](https://fyne.io) application compiled to WebAssembly — no JavaScript framework, no npm; `make web-ui` packages it into `web-ui/wasm`, which the server serves straight off disk — nothing is embedded into the binary, so the bundle can be replaced without relinking
+*   A single dark theme, forced in the app itself; the loading page is the one `fyne package` generates, with Fyne's own dark stylesheet
+*   Real-time status and traffic updates over Socket.IO, using the Go client (`github.com/zishang520/socket.io/clients/socket/v3`) pinned to the HTTP long-polling transport, since a wasm build has no TCP stack for websockets; REST polling takes over whenever the socket is down
+*   `web-ui/api` holds every request/response and event struct. The backend imports the same package through a `replace` directive, so the two sides cannot drift apart
+*   Client-side form validation mirroring the backend's AmneziaWG 3.x parameter rules (S1-S4 ≥ 12, Jmin/Jmax bounds, etc.)
 
-### Структура каталогов
+### Directory Structure
 
 ```
 .
-├── main.go                    # Точка входа, приложение Fiber, отдача фронтенда с диска
+├── main.go                    # Entry point, Fiber app, serves the frontend off disk
 ├── internal/
-│   ├── handlers.go            # Обработчики маршрутов REST API
-│   ├── manager.go             # Жизненный цикл серверов/клиентов и генерация конфигов AmneziaWG
-│   ├── migrations.go          # Однократные стартовые миграции конфига
-│   ├── types.go               # Конфиг на диске + алиасы к web-ui/api
-│   └── ws.go                  # Хаб Socket.IO
-├── web-ui/                    # Фронтенд на Fyne, отдельный Go-модуль
-│   ├── FyneApp.toml           # Метаданные приложения для "fyne package"
-│   ├── Icon.png               # Иконка приложения
-│   ├── api/types.go           # Wire-типы, общие с бэкендом (через replace)
-│   ├── wasm/                  # Результат "fyne package": страница-загрузчик + бандл (генерируется)
-│   ├── main.go                # Вход в приложение: тёмная тема, окно, жизненный цикл
-│   └── internal/ui/           # Само приложение
-│       ├── ui.go              # Раскладка, опрос, общие виджеты
-│       ├── theme.go           # Единственная тёмная тема
-│       ├── api.go             # REST-клиент
-│       ├── socket.go          # Клиент Socket.IO (транспорт long-polling)
-│       ├── servers.go         # Карточки серверов
-│       ├── clients.go         # Строки клиентов и диалог добавления/редактирования
-│       ├── forms.go           # Форма создания сервера и валидация
-│       ├── dialogs.go         # Просмотр конфигов и QR-коды
-│       ├── browser.go         # Хелперы syscall/js (скачивание, origin)
-│       └── browser_unsupported.go # Заглушки для сборок не под wasm (чтобы "go vet" работал везде)
-├── CLAUDE.md                  # Соглашения репозитория для кодовых агентов
-├── e2e/                       # Браузерные тесты Playwright (см. e2e/README.md)
-│   ├── 01-smoke.spec.js       # Загрузка страницы, вход, отрисовка канваса
-│   ├── 02-create.spec.js      # Создание сервера через UI
-│   ├── 03-client.spec.js      # Добавление клиента
-│   ├── 04-config.spec.js      # Просмотр конфигов и QR
-│   ├── 05-socket.spec.js      # Обновления по Socket.IO
-│   └── helpers.js             # Вход, клики по координатам, проверки через API
+│   ├── handlers.go            # REST API route handlers
+│   ├── manager.go             # Server/client lifecycle & AmneziaWG config generation
+│   ├── migrations.go          # One-shot startup config migrations
+│   ├── types.go               # On-disk config + aliases to web-ui/api
+│   └── ws.go                  # Socket.IO hub
+├── web-ui/                    # Fyne frontend, a separate Go module
+│   ├── api/types.go           # Wire types shared with the backend (via replace)
+│   ├── wasm/                  # "fyne package" output: loader page + bundle (generated)
+│   ├── main.go                # App entry: dark theme, window, lifecycle
+│   └── internal/ui/           # The application itself
+│       ├── ui.go              # Layout, polling, shared widgets
+│       ├── theme.go           # The single dark theme
+│       ├── api.go             # REST client
+│       ├── socket.go          # Socket.IO client (long-polling transport)
+│       ├── servers.go         # Server cards
+│       ├── clients.go         # Client rows and the add/edit dialog
+│       ├── forms.go           # Create-server form and validation
+│       ├── dialogs.go         # Config viewers and QR codes
+│       └── browser.go         # syscall/js helpers (downloads, origin)
+├── CLAUDE.md                   # Repository conventions for coding agents
+├── e2e/                       # Playwright browser tests (see e2e/README.md)
 ├── scripts/
-│   ├── start.sh               # Точка входа контейнера (запускается через tini)
+│   ├── start.sh                # Container entrypoint (exec'd by tini)
 │   ├── setup_iptables.sh
 │   └── cleanup_iptables.sh
-├── .github/workflows/docker.yaml # CI: сборка и публикация образа
-├── Dockerfile                 # Многоэтапная сборка: бинарник Go + закреплённые amneziawg-go и amneziawg-tools
-├── docker-compose.yml         # Базовый compose-файл (запускает готовый образ, без сборки)
-├── docker-compose.build.yml   # Оверлей, добавляющий `build: .` (используется в `make run`)
+├── Dockerfile                  # Multi-stage build: Go binary + pinned amneziawg-go + amneziawg-tools
+├── docker-compose.yml           # Base compose file (runs a pre-built image, no build)
+├── docker-compose.build.yml      # Overlay adding `build: .` (used by `make run`)
 └── Makefile
 ```
 
-## 🔨 Сборка и локальный запуск
+## 🔨 Building & Running Locally
 
-Нужен Go 1.26+. Бандл фронтенда собирается командой `make web-ui` (или
-`make build`, которая сначала вызывает её) — инструмент упаковки `fyne`
-объявлен как `tool`-зависимость модуля `web-ui`, поэтому отдельная установка
-не требуется.
-
-```bash
-make help          # список всех целей с описаниями
-make build         # make web-ui + go build -o server.bin . — сборка без docker
-make build-server  # только бинарник; он отдаст бандл, уже лежащий в web-ui/wasm
-make web-ui        # пересобрать только WebAssembly-бандл в web-ui/wasm
-make vet           # go vet ./... по обоим модулям (второй — под GOOS=js GOARCH=wasm)
-make run           # docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
-                   # собирает полный образ из исходников (бинарник Go + amneziawg-go + amneziawg-tools) и запускает его
-make exec          # shell внутри работающего контейнера
-make e2e           # браузерные тесты Playwright по работающему экземпляру
-make deploy        # собрать образ, выгрузить в proxy.tar и развернуть по ssh (хост спрашивается интерактивно)
-```
-
-`make run` — самый простой способ получить полностью рабочий контейнер (с
-настоящим движком AmneziaWG в user space, умеющим v3), не устанавливая ничего,
-кроме Docker. Значения по умолчанию для локального запуска лежат в `.env`
-(`COMPOSE_PROJECT_NAME`, `WEB_UI_PORT`, `DEFAULT_PORT`, `AUTO_START_SERVERS`,
-`DEFAULT_MTU`, `WEB_UI_PASSWORD`, …).
-
-### Браузерные тесты
-
-Фронтенд — это один канвас WebAssembly, поэтому селекторов CSS у него нет:
-тесты в `e2e` кликают по координатам (при фиксированном окне 1500x950) и
-проверяют результат через REST API, а скриншоты каждого шага складывают в
-`e2e/shots/`. Им нужен работающий экземпляр — как его поднять, описано в
-[`e2e/README.md`](e2e/README.md); адрес задаётся переменной `AWG_URL`
-(по умолчанию `http://localhost:51836`). Спеки делят один бэкенд и опираются
-на состояние друг друга, поэтому выполняются по порядку файлов в один поток
-и рассчитывают на экземпляр без настроенных серверов.
+Requires Go 1.26+. The frontend bundle is built by `make web-ui` (or `make build`, which
+runs it first) — the `fyne` packaging tool is declared as a `tool` dependency of the
+`web-ui` module, so no separate install step is needed.
 
 ```bash
-make e2e
+make build   # go build -o server.bin . — compiles the binary, no docker
+make vet     # go vet ./... — lint check
+make run     # docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
+             # builds the full image from source (Go binary + amneziawg-go + amneziawg-tools) and runs it
 ```
 
-## 🔧 Эндпоинты API
+`make run` is the easiest way to get a fully working container (with a
+real, v3-capable AmneziaWG userspace engine) without installing anything
+besides Docker. Configuration defaults for a local run live in `.env`
+(`WEB_UI_PORT`, `DEFAULT_PORT`, `AUTO_START_SERVERS`, `DEFAULT_MTU`,
+`WEB_UI_PASSWORD`, ...).
 
-Все маршруты, кроме `/status`, закрыты basic auth (см. [Безопасность](#безопасность)).
+## 🔧 API Endpoints
 
-### Управление серверами
+### Server Management
 
-#### Создать сервер
+#### Create Server
 
 ```yaml
 POST /api/servers
@@ -256,8 +186,6 @@ Content-Type: application/json
   "port": 51834,
   "subnet": "10.0.0.0/24",
   "mtu": 1280,
-  "endpoint": "vpn.example.com",
-  "dns": "8.8.8.8,1.1.1.1",
   "obfuscation": true,
   "auto_start": true,
   "obfuscation_params": {
@@ -277,61 +205,58 @@ Content-Type: application/json
 }
 ```
 
-`endpoint` и `dns` необязательны: без них берётся определённый публичный IP
-и `DEFAULT_DNS`. `dns` принимает как строку через запятую, так и массив строк.
+#### AmneziaWG 3.1 (header protection, random trailers)
 
-#### AmneziaWG 3.1 (защита заголовков, random trailers)
+There is only one obfuscation mode now: setting `"obfuscation": true` always
+enables the full AmneziaWG 3.x parameter set, including mandatory header
+protection. Older 1.0/1.5/2.0-only modes (and the previous `awg2`/`awg3`
+request flags) have been removed.
 
-Режим обфускации теперь только один: `"obfuscation": true` всегда включает
-полный набор параметров AmneziaWG 3.x, включая обязательную защиту
-заголовков. Старые режимы только-1.0/1.5/2.0 (и прежние флаги запроса
-`awg2`/`awg3`) удалены.
-
-*   `S1`, `S2`, `S3`, `S4` должны быть **≥ 12** (шифр защиты заголовков берёт
-    свой 12-байтный nonce из начала этого паддинга); иначе сервер отклонит
-    запрос.
-*   Требуется 32-байтный `HeaderProtectionKey` в base64; он генерируется
-    автоматически, если вы не передали свой в `obfuscation_params`. Он должен
-    побайтово совпадать у сервера и каждого его клиента — для конфигов,
-    которые генерирует приложение, это делается автоматически.
-*   Необязательные «клиентские» тайминг-параметры (каждая сторона применяет
-    их к собственному поведению, поэтому совпадать они не обязаны):
+*   `S1`, `S2`, `S3`, `S4` must all be **≥ 12** (the header-protection cipher
+    takes its 12-byte nonce from the start of this padding); the server
+    rejects the request otherwise.
+*   A 32-byte base64 `HeaderProtectionKey` is required and generated
+    automatically if you don't supply one in `obfuscation_params`. It must be
+    identical, byte-for-byte, between the server and every one of its
+    clients — the app takes care of that automatically for configs it
+    generates.
+*   Optional "client-side" tuning knobs (each side applies them to its own
+    behavior, so they don't need to match between server and client):
     `ContentPaddingAddition`, `RekeyAfterTime`, `RekeyTimeout`,
     `RejectAfterTime`, `KeepaliveTimeout`, `MaxHandshakeAttempts`,
-    `PersistentKeepalive`. Каждый принимает целое число или диапазон
-    `"a-b"` (например, `"5-10"`); оставьте пустым, чтобы использовать
-    значения движка по умолчанию.
+    `PersistentKeepalive`. All accept a plain integer or an `"a-b"` range
+    (e.g. `"5-10"`); leave them unset to use the engine defaults.
 
-    | Параметр | Значение движка (не задано) | Рекомендуемый диапазон |
+    | Parameter | Engine default (unset) | Suggested range |
     |---|---|---|
-    | `ContentPaddingAddition` | выкл. (выравнивание по 16 байт) | `0-64` |
-    | `RekeyAfterTime` | 120 с | `100-140` |
-    | `RekeyTimeout` | 5 с | `4-7` |
-    | `RejectAfterTime` | 180 с | `160-200` |
-    | `KeepaliveTimeout` | 10 с | `8-12` |
+    | `ContentPaddingAddition` | off (16-byte alignment) | `0-64` |
+    | `RekeyAfterTime` | 120s | `100-140` |
+    | `RekeyTimeout` | 5s | `4-7` |
+    | `RejectAfterTime` | 180s | `160-200` |
+    | `KeepaliveTimeout` | 10s | `8-12` |
     | `MaxHandshakeAttempts` | 18 | `14-20` |
-    | `PersistentKeepalive` | 25 с | `22-30` (из примера в README самого `amneziawg-go`) |
+    | `PersistentKeepalive` | 25s | `22-30` (from `amneziawg-go`'s own README example) |
 
-    Столбец «значение движка» взят напрямую из `device/constants.go`
-    в `amneziawg-go` (стандартные тайминговые константы WireGuard).
-    Официально задокументированный рекомендуемый диапазон есть только у `Jc`
-    (`4-12`) и `PersistentKeepalive` (`22-30`) — остальная часть столбца
-    «рекомендуемый диапазон» это консервативный джиттер вокруг значений по
-    умолчанию, а не официальная рекомендация: AmneziaWG её не публикует.
+    The "engine default" column comes straight from
+    `amneziawg-go`'s `device/constants.go` (standard WireGuard timing
+    constants). Only `Jc` (`4-12`) and `PersistentKeepalive` (`22-30`) have an
+    officially documented recommended range — the rest of the "suggested
+    range" column is a conservative jitter around the defaults, not an
+    official recommendation, since AmneziaWG doesn't publish one.
 
-*   Два переключателя формирования пакетов AmneziaWG 3.1, `RandomTrailers` и
-    `DisableCookies` — обычные булевы значения JSON, оба **включены**, когда
-    сервер генерирует параметры сам:
+*   Two AmneziaWG 3.1 packet-shaping switches, `RandomTrailers` and
+    `DisableCookies`, both plain JSON booleans and both **on** when the
+    server generates its own parameters:
 
-    | Параметр | Тип | По умолчанию | Примечания |
+    | Parameter | Type | Default | Notes |
     |---|---|---|---|
-    | `RandomTrailers` | bool | `true` | Случайный «хвост» у каждого пакета; **должен совпадать на сервере и клиенте** |
-    | `DisableCookies` | bool | `true` | Никогда не отправлять cookie reply, пропускать проверки MAC2 под нагрузкой |
+    | `RandomTrailers` | bool | `true` | Random-length tail on every packet; **must match on server and client** |
+    | `DisableCookies` | bool | `true` | Never send cookie replies, skip under-load MAC2 checks |
 
-    Передайте `"RandomTrailers": false` (и/или `"DisableCookies": false`) в
-    `obfuscation_params`, чтобы их не включать. Выключенный флаг пишется как
-    *полное отсутствие строки*, а не `= off`, потому что парсер до 3.1
-    отвергает неизвестный ключ целиком и отказался бы импортировать конфиг.
+    Pass `"RandomTrailers": false` (and/or `"DisableCookies": false`) in
+    `obfuscation_params` to leave them out. An off flag is written as
+    *nothing at all* rather than `= off`, because a pre-3.1 parser rejects
+    an unknown key outright and would refuse to import the config.
 
 ```yaml
 POST /api/servers
@@ -358,78 +283,78 @@ Content-Type: application/json
 ```
 
 > [!NOTE]
-> **Перенос уже работающего сервера**: существующие серверы продолжают
-> работать без изменений — это касается только вновь создаваемых. Пересоберите
-> образ (`docker compose build` / `make run`), чтобы получить закреплённые
-> бинарники `amneziawg-go`/`amneziawg-tools` версии 3.1; новый движок читает
-> конфиг эпохи 3.0 ровно так же, как раньше, а отсутствующие ключи
-> `RandomTrailers`/`DisableCookies` означают «выключено». Серверы, созданные
-> до появления поддержки AmneziaWG 3.0 (без `HeaderProtectionKey` и,
-> возможно, с `S1`-`S4` меньше 12), тоже работают как прежде — их файлы
-> конфигурации ничто автоматически не переписывает. Чтобы перевести такой
-> сервер на AmneziaWG 3.x, его нужно пересоздать (либо вручную отредактировать
-> `web_config.json` и `.conf` сервера, добавив `S1`-`S4` ≥ 12 и
-> `HeaderProtectionKey`), а затем раздать заново сгенерированные клиентские
-> конфиги — старые конфиги без совпадающего `HeaderProtectionKey` не смогут
-> подключиться, как только на сервере включится защита заголовков.
+> **Migrating an already-running server**: existing servers keep working
+> unchanged — this change only affects newly created servers. Rebuild the
+> image (`docker compose build` / `make run`) to get the pinned 3.1
+> `amneziawg-go`/`amneziawg-tools` binaries; the new engine still reads a
+> 3.0-era config file exactly as before, and absent `RandomTrailers` /
+> `DisableCookies` keys mean off. Servers created before AmneziaWG 3.0
+> support (without a `HeaderProtectionKey`, and possibly with `S1`-`S4`
+> below 12) also keep running exactly as before — nothing rewrites their
+> config files automatically. To move such a server to AmneziaWG 3.x you
+> must recreate it (or hand-edit `web_config.json` and the server's `.conf`
+> file to add `S1`-`S4` ≥ 12 and a `HeaderProtectionKey`), then redistribute
+> regenerated client configs — old client configs without the matching
+> `HeaderProtectionKey` will not be able to connect once the server has
+> header protection turned on.
 
 > [!IMPORTANT]
-> **Переключатели 3.1 включаются для существующих серверов автоматически.**
-> При первом старте после этого релиза приложение включает `RandomTrailers` и
-> `DisableCookies` для каждого обфусцированного сервера и клиента, созданных
-> раньше, дописывает две строки в каждый `.conf` сервера и проставляет
-> `schema_version: 1` в `web_config.json`, чтобы миграция отработала ровно
-> один раз — решение выключить флаги позже переживёт перезапуск. В лог
-> попадает каждый затронутый сервер, а также те, что были запущены и требуют
-> перезапуска, чтобы подхватить флаги. Ключи не меняются: `PrivateKey`,
-> `PublicKey`, `PresharedKey` и `HeaderProtectionKey` остаются прежними.
+> **The 3.1 switches are turned on for existing servers automatically.** On
+> the first start after this release the app enables `RandomTrailers` and
+> `DisableCookies` for every obfuscated server and client that predates
+> them, adds the two lines to each server `.conf`, and stamps
+> `schema_version: 1` into `web_config.json` so it runs exactly once — a
+> later decision to switch them back off survives a restart. It logs every
+> server it touched and names any that were running and need a restart to
+> pick the flags up. No keys change: `PrivateKey`, `PublicKey`,
+> `PresharedKey` and `HeaderProtectionKey` all stay as they are.
 >
-> **Уже розданные клиентские конфиги в этот момент перестают работать**, так
-> как `RandomTrailers` обязан совпадать — экспортируйте и раздайте их заново
-> (ключи те же, так что существующему конфигу нужна лишь одна дополнительная
-> строка в `[Interface]`). Установленные туннели ещё пару минут гонят данные и
-> отваливаются на следующем rekey; не примите эту задержку за рабочую схему.
-> Планируйте обновление на момент, когда сможете раздать новые конфиги.
+> **Client configs already in the wild stop working at that moment**, since
+> `RandomTrailers` has to match — re-export and redistribute them (same
+> keys, so an existing config only needs the one extra `[Interface]` line).
+> Established tunnels keep passing data for a couple of minutes and then die
+> at the next rekey; don't mistake that delay for a working setup. Plan the
+> upgrade for a moment when you can hand out the new configs.
 
-#### Список серверов
+#### List Servers
 
 `GET /api/servers`
 
-#### Запустить сервер
+#### Start Server
 
 `POST /api/servers/{server_id}/start`
 
-#### Остановить сервер
+#### Stop Server
 
 `POST /api/servers/{server_id}/stop`
 
-#### Удалить сервер
+#### Delete Server
 
 `DELETE /api/servers/{server_id}`
 
-#### Получить конфигурацию сервера
+#### Get Server Configuration
 
 `GET /api/servers/{server_id}/config`
 
-#### Скачать конфиг сервера
+#### Download Server Config
 
 `GET /api/servers/{server_id}/config/download`
 
-#### Информация о сервере
+#### Get Server Info
 
 `GET /api/servers/{server_id}/info`
 
-#### Трафик сервера
+#### Get Server Traffic
 
 `GET /api/servers/{server_id}/traffic`
 
-#### Трафик всех серверов
+#### Get Traffic For All Servers
 
 `GET /api/servers/traffic`
 
-### Управление клиентами
+### Client Management
 
-#### Добавить клиента
+#### Add Client
 
 ```yaml
 POST /api/servers/{server_id}/clients
@@ -442,117 +367,88 @@ Content-Type: application/json
 }
 ```
 
-#### Список клиентов сервера
+#### List Server Clients
 
 `GET /api/servers/{server_id}/clients`
 
-#### Список всех клиентов (по всем серверам)
+#### List All Clients (across all servers)
 
 `GET /api/clients`
 
-#### Удалить клиента
+#### Delete Client
 
 `DELETE /api/servers/{server_id}/clients/{client_id}`
 
-#### Изменить AllowedIPs клиента
+#### Update Client AllowedIPs
 
 `PUT /api/servers/{server_id}/clients/{client_id}/allowed-ips`
 
-#### Изменить I-настройки клиента (сигнатурные пакеты I1-I5)
+#### Update Client I-Settings (I1-I5 signature packets)
 
 `PUT /api/servers/{server_id}/clients/{client_id}/i-settings`
 
-#### Приостановить / активировать клиента (снять пира на лету, не удаляя его)
+#### Suspend / Activate a Client (drop the peer live without deleting it)
 
 `POST /api/servers/{server_id}/clients/{client_id}/suspend`
 `POST /api/servers/{server_id}/clients/{client_id}/activate`
 
-#### Задать время автоприостановки клиента
+#### Set Client Auto-Suspend Time
 
 `PUT /api/servers/{server_id}/clients/{client_id}/suspend-time`
 
-Тело — `{"suspend_at": "<ISO 8601>"}` либо `{"suspend_at": null}`, чтобы снять таймер.
-
-#### Скачать конфиг клиента как `text/plain` (файл .conf)
+#### Download Client Config as `text/plain` (.conf file)
 
 `GET /api/servers/{server_id}/clients/{client_id}/config`
 
-#### Конфиг клиента в текстовом виде и в виде QR/JSON одновременно
+#### Get Client Config in Both Text and QR/JSON Form
 
 `GET /api/servers/{server_id}/clients/{client_id}/config-both`
 
-#### Нативная ссылка AmneziaVPN (`vpn://…`)
-
-`GET /api/servers/{server_id}/clients/{client_id}/link`
-
-Импортёр обычных `.conf` в официальном приложении `amnezia-client` всегда
-помечает импортированный конфиг AWG как устаревший контейнер `amnezia-awg`
-(отображается как «AmneziaWG 2.0», без защиты заголовков) вместо актуального
-`amnezia-awg2`. Эта нативная ссылка несёт поля `container` и
-`protocol_version`, по которым приложение распознаёт сервер как
-AmneziaWG 3.x. В UI это третья вкладка в модальном окне с QR-кодом клиента.
-
-#### I-настройки по умолчанию (значения I1-I5, применяемые при `apply_i_settings`)
+#### Get Default I-Settings (I1-I5 defaults used when `apply_i_settings` is on)
 
 `GET /api/default-i-settings`
 
-### Системные эндпоинты
+### System Management
 
-#### Статус системы (публичный IP и т. д.)
+#### System Status (public IP, etc.)
 
 `GET /api/system/status`
 
-#### Обновить публичный IP
+#### Refresh Public IP
 
 `GET /api/system/refresh-ip`
 
-#### Проверка iptables
+#### IPTables Test
 
 `GET /api/system/iptables-test?server_id=wg_abc123`
 
-#### Health check (единственный маршрут без авторизации)
+## 🐳 Docker Deployment
 
-`GET /status` — время работы контейнера; используется в `HEALTHCHECK` образа.
+CI builds and pushes the image to Docker Hub on every push to `master`/tags
+(see `.github/workflows/docker.yaml`); check your own fork's Docker Hub
+repository (`docker.io/<your-dockerhub-username>/<repo-name>`) for the exact
+tag, or just build locally with `make run` / `docker compose build`.
 
-## 🐳 Развёртывание в Docker
+### Environment Variables
 
-CI собирает и публикует образ в Docker Hub при каждом push в `master` и по
-тегам (см. `.github/workflows/docker.yaml`); точный тег смотрите в Docker Hub
-своего форка (`docker.io/<ваш-логин-dockerhub>/<имя-репозитория>`) либо просто
-соберите локально через `make run` / `docker compose build`.
-
-Версии upstream AmneziaWG закреплены в `Dockerfile`
-(`AWG_GO_VERSION=v3.1.20260828`, `AWG_TOOLS_VERSION=v3.1.20260812`), поэтому
-пересборка не может незаметно подтянуть несовместимый или сломанный коммит
-из `master`. Обе версии должны быть из одного поколения AmneziaWG. Собрать с
-другими тегами:
-
-```bash
-docker build --build-arg AWG_GO_VERSION=vX.Y.Z --build-arg AWG_TOOLS_VERSION=vX.Y.Z -t awgui .
-```
-
-### Переменные окружения
-
-| Переменная | По умолчанию | Описание |
+| Variable | Default | Description |
 |----------|---------|-------------|
-| `WEB_UI_PORT` | `80` | Порт, на котором приложение слушает веб-интерфейс. В образе задан через `ENV`; у бинарника, запущенного без этой переменной, значение по умолчанию — `5000` |
-| `WEB_UI_USER` | `admin` | Имя пользователя для basic auth |
-| `WEB_UI_PASSWORD` | `changeme` | Пароль для basic auth — SHA-256 в base64: `printf 'secret' \| openssl dgst -binary -sha256 \| base64` |
-| `AUTO_START_SERVERS` | `true` | Автозапуск серверов при старте контейнера |
-| `DEFAULT_MTU` | `1280` | MTU по умолчанию для новых серверов. Действует только для API-запросов; при управлении через UI задаётся в UI |
-| `DEFAULT_SUBNET` | `10.0.0.0/24` | Подсеть по умолчанию для новых серверов. Действует только для API-запросов; при управлении через UI задаётся в UI |
-| `DEFAULT_PORT` | `51834` | Порт по умолчанию для новых серверов. Действует только для API-запросов; при управлении через UI задаётся в UI |
-| `DEFAULT_DNS` | `8.8.8.8,1.1.1.1` | DNS-серверы по умолчанию для клиентов. Действует только для API-запросов; при управлении через UI задаётся в UI |
+| `WEB_UI_PORT` | `80` | Port the app listens on for the web interface |
+| `WEB_UI_USER` | `admin` | Username for basic auth in the app |
+| `WEB_UI_PASSWORD` | `changeme` | Password for basic auth in the app  SHA-256 `printf 'secret' \| openssl dgst -binary -sha256 \| base64` |
+| `AUTO_START_SERVERS` | `true` | Auto-start servers on container startup |
+| `DEFAULT_MTU` | `1280` | Default MTU value for new servers. Effective only for api requests. For UI management set via UI. |
+| `DEFAULT_SUBNET` | `10.0.0.0/24` | Default subnet for new servers. Effective only for api requests. For UI management set via UI. |
+| `DEFAULT_PORT` | `51834` | Default port for new servers. Effective only for api requests. For UI management set via UI. |
+| `DEFAULT_DNS` | `8.8.8.8,1.1.1.1` | Default DNS servers for clients. Effective only for api requests. For UI management set via UI. |
 
-### Пример docker compose
+### Docker Compose Example
 
-В репозитории уже есть два compose-файла: `docker-compose.yml` (базовый,
-запускает готовый `image:`, без сборки) и `docker-compose.build.yml`
-(оверлей, добавляющий `build: .`). `make run` объединяет оба, чтобы собрать
-из исходников и запустить; чтобы поднять уже собранный или скачанный образ,
-используйте только базовый файл: `docker compose -f docker-compose.yml up -d`.
-Базовый файл читает порты и настройки из `.env`. Минимальный
-самостоятельный пример со сборкой на месте:
+This repo already ships two compose files: `docker-compose.yml` (base, runs a
+pre-built `image:`, no build step) and `docker-compose.build.yml` (an overlay
+that adds `build: .`). `make run` combines both to build from source and run;
+`make run-image` runs the base file only, against an already-built/pulled
+image. A minimal standalone example, building locally:
 
 ```yaml
 services:
@@ -583,7 +479,7 @@ volumes:
   amnezia-data:
 ```
 
-### Пример docker run
+### Docker Run Example
 
 ```bash
 docker run -d \
@@ -604,136 +500,117 @@ docker run -d \
   -e DEFAULT_PORT=51821 \
   -e DEFAULT_DNS="8.8.8.8,8.8.4.4" \
   -v amnezia-data:/etc/amnezia \
-  <ваш-образ>:latest
+  <your-image>:latest
 ```
 
-Если нужен HTTPS, поставьте перед контейнером собственный reverse proxy с
-терминацией TLS (nginx, Caddy, Traefik и т. п.) и проксируйте на `WEB_UI_PORT`.
+If you need HTTPS, put your own TLS-terminating reverse proxy (nginx, Caddy, Traefik, etc.) in front of the container and forward to `WEB_UI_PORT`.
 
-## 📊 Параметры обфускации
+## 📊 Obfuscation Parameters
 
-Каждый созданный здесь сервер использует полный набор параметров обфускации
-AmneziaWG 3.x (параметры, относящиеся к защите заголовков, два переключателя
-3.1, значения движка по умолчанию и рекомендуемые диапазоны необязательных
-тайминг-параметров см. выше в разделе
-[AmneziaWG 3.1 — главное](#-amneziawg-31--главное)). Этот раздел описывает
-базовые параметры мусорных пакетов, паддинга и заголовков, общие с
-предыдущими поколениями AmneziaWG.
+Every server created here uses the full AmneziaWG 3.x obfuscation parameter
+set (see [AmneziaWG 3.1, front and center](#-amneziawg-31-front-and-center)
+above for the header-protection-specific parameters, the two 3.1 switches,
+engine defaults and suggested ranges of the optional timing knobs). This
+section covers the base junk-packet/padding/header parameters shared with
+earlier AmneziaWG generations.
 
-### Справочник параметров
+### Parameter Reference
 
-| Параметр | Ограничение | Пример значения | Описание |
+| Parameter | Constraint | Example default | Description |
 | --- | --- | --- | --- |
-| `Jc` | рекомендуется 4-12 | 8 | Количество мусорных пакетов перед рукопожатием |
-| `Jmin` | ≥ 1, < `Jmax` | 8 | Минимальный размер мусорного пакета |
-| `Jmax` | > `Jmin`, ≤ MTU | 80 | Максимальный размер мусорного пакета |
-| `S1` | 15-150, ≤ MTU-148 | 50 | Паддинг перед сообщением handshake initiation |
-| `S2` | 15-150, ≤ MTU-92, `S1+56 ≠ S2` | 60 | Паддинг перед сообщением handshake response |
-| `S3` | **≥ 12** (защита заголовков), ≤ 256 | 20 | Паддинг перед сообщением cookie reply |
-| `S4` | **≥ 12** (защита заголовков), ≤ 32 | 16 | Паддинг перед каждым транспортным сообщением (данные) |
-| `H1`-`H4` | Уникальные, от 5 до 2147483647 | 1000/2000/3000/4000 | Значения поля типа сообщения для handshake-init/response/cookie/transport |
-| `HeaderProtectionKey` | 32 байта в base64 | генерируется автоматически | Ключ защиты заголовков AmneziaWG 3.0, должен совпадать на сервере и клиенте |
-| `RandomTrailers` | bool | `true` | AmneziaWG 3.1: случайный «хвост» у каждого пакета, должен совпадать на сервере и клиенте |
-| `DisableCookies` | bool | `true` | AmneziaWG 3.1: никогда не отправлять cookie reply, пропускать проверки MAC2 под нагрузкой |
-| `MTU` | 1280-1440 | 1280 | MTU интерфейса туннеля |
+| `Jc` | 4-12 recommended | 8 | Number of junk packets sent before the handshake |
+| `Jmin` | ≥ 1, < `Jmax` | 8 | Minimum size of each junk packet |
+| `Jmax` | > `Jmin`, ≤ MTU | 80 | Maximum size of each junk packet |
+| `S1` | 15-150, ≤ MTU-148 | 50 | Padding before the handshake-initiation message |
+| `S2` | 15-150, ≤ MTU-92, `S1+56 ≠ S2` | 60 | Padding before the handshake-response message |
+| `S3` | **≥ 12** (header protection), ≤ 256 | 20 | Padding before the cookie-reply message |
+| `S4` | **≥ 12** (header protection), ≤ 32 | 16 | Padding before every transport (data) message |
+| `H1`-`H4` | Unique, 5 to 2147483647 | 1000/2000/3000/4000 | Message-type header values for handshake-init/response/cookie/transport |
+| `HeaderProtectionKey` | 32-byte base64 | auto-generated | AmneziaWG 3.0 header-protection key, must match on server and client |
+| `RandomTrailers` | bool | `true` | AmneziaWG 3.1: random-length tail on every packet, must match on server and client |
+| `DisableCookies` | bool | `true` | AmneziaWG 3.1: never send cookie replies, skip under-load MAC2 checks |
+| `MTU` | 1280-1440 | 1280 | Maximum Transmission Unit for the tunnel interface |
 
-Границы `S1`/`S2` зависят от MTU (`S1 ≤ MTU-148`, `S2 ≤ MTU-92`, обе не
-больше 150); приложение проверяет это, а также правила `S1+56 ≠ S2` и
-`S3`/`S4` ≥ 12 и на клиенте (валидация формы), и на сервере — до записи
-любого файла конфигурации.
+`S1`/`S2` bounds scale with MTU (`S1 ≤ MTU-148`, `S2 ≤ MTU-92`, both capped
+at 150); the app enforces this and the `S1+56 ≠ S2` and `S3`/`S4` ≥ 12 rules
+both client-side (JS validation) and server-side before writing any config
+file.
 
-### Подробное описание параметров
+### Detailed Parameter Explanation
 
-#### Jc, Jmin, Jmax (мусорные пакеты)
+#### Jc, Jmin, Jmax (junk packets)
 
-*   Отправляются непосредственно перед каждой попыткой рукопожатия, чтобы
-    сломать фиксированную сигнатуру рукопожатия WireGuard из двух датаграмм.
-*   Меньше `Jc` — меньше мусорных пакетов (выше производительность, слабее
-    обфускация); больше `Jc` — больше мусорных пакетов (сильнее обфускация,
-    чуть больше накладных расходов). Обычно рекомендуют диапазон 4-12.
+*   Sent right before every handshake attempt to break the fixed
+    two-datagram WireGuard handshake signature.
+*   Lower `Jc` = fewer junk packets (better performance, less obfuscation);
+    higher `Jc` = more junk packets (more obfuscation, slightly more
+    overhead). 4-12 is the generally recommended range.
 
-#### S1-S4 (паддинг сообщений)
+#### S1-S4 (message padding)
 
-*   `S1`/`S2` дополняют сообщения handshake initiation/response; `S3`/`S4` —
-    cookie reply и транспортные сообщения.
-*   Поскольку защита заголовков AmneziaWG 3.0 берёт 12-байтный nonce шифра из
-    начала этого паддинга, **все четыре должны быть ≥ 12**, когда задан
-    `HeaderProtectionKey` (а это приложение задаёт его всегда).
+*   `S1`/`S2` pad the handshake-initiation/response messages; `S3`/`S4` pad
+    the cookie-reply/transport messages.
+*   Since AmneziaWG 3.0's header protection takes its 12-byte cipher nonce
+    from the start of this padding, **all four must be ≥ 12** whenever
+    `HeaderProtectionKey` is set (which this app always sets).
 
-#### H1-H4 (значения заголовков)
+#### H1-H4 (header values)
 
-*   Заменяют поле типа сообщения у каждого типа пакета, чтобы он не выглядел
-    узнаваемой сигнатурой WireGuard/AmneziaWG. Все четыре должны отличаться
-    друг от друга.
+*   Replace the message-type field of each packet type so it doesn't look
+    like a recognizable WireGuard/AmneziaWG signature. All four must be
+    unique from each other.
 
 #### MTU
 
-*   `1280` — самое безопасное и совместимое значение; `1420`-`1440` даёт
-    лучшую пропускную способность, но в некоторых сетях приводит к
-    фрагментации.
+*   `1280` is the safest, most compatible value; `1420`-`1440` gives better
+    throughput but can hit fragmentation issues on some networks.
 
-## 📝 Логи и мониторинг
+## 📝 Logs and Monitoring
 
-### Логи приложения
+### Application logs
 
-Приложение пишет только в stdout/stderr (стандартная практика для
-контейнеров), смотреть так:
+The app logs only to stdout/stderr (standard practice for containers), view them with:
 
 `docker logs -f amnezia-web-ui`
 
-Базовый `docker-compose.yml` ограничивает журнал тремя файлами по 10 МБ.
+## 🔄 Backup and Restore
 
-## 🔄 Резервное копирование и восстановление
-
-Отдельного эндпоинта экспорта/импорта нет — сохраняйте целиком каталог
-состояния AmneziaWG: в нём лежит `web_config.json` (метаданные серверов и
-клиентов, ключи, все параметры AmneziaWG 3.x) и файл `.conf` каждого
-интерфейса:
+There's no dedicated export/import API endpoint — back up the whole
+AmneziaWG state directory, which contains every server's `web_config.json`
+(server/client metadata, keys, all AmneziaWG 3.x parameters) and each
+interface's `.conf` file:
 
 ```bash
 docker cp amnezia-web-ui:/etc/amnezia ./amnezia-backup/
 ```
 
-Для восстановления остановите контейнер, скопируйте сохранённый каталог
-обратно в том `/etc/amnezia` и запустите контейнер снова.
+To restore, stop the container, copy the backed-up directory back onto the
+`/etc/amnezia` volume, and start the container again.
 
-Отдельный сервер или клиента можно также просто скачать через UI или
-`GET /api/servers/{server_id}/config` /
+For a single server/client, you can also just download its config via the
+UI or `GET /api/servers/{server_id}/config` /
 `GET /api/servers/{server_id}/clients/{client_id}/config`.
 
-## Команды для отладки
+## Debug Commands
 
-### Проверить статус сервера
+### Check server status
 
-`curl -u admin:changeme http://localhost/api/system/status`
+`curl http://localhost/api/system/status`
 
-### Проверить настройку iptables
+### Test iptables configuration
 
-`curl -u admin:changeme "http://localhost/api/system/iptables-test?server_id=wg_abc123"`
+`curl "http://localhost/api/system/iptables-test?server_id=wg_abc123"`
 
-### Проверить, что контейнер жив (без авторизации)
-
-`curl http://localhost/status`
-
-# Безопасность
-
-Приложение выставлено напрямую на порт 80 (или заданный `WEB_UI_PORT`), с
-basic-аутентификацией, встроенной в само приложение Fiber. Без авторизации
-доступен только `/status` — health check контейнера; вся статика UI закрыта
-теми же учётными данными, что и API.
+# Security
+The app is exposed directly on port 80 (or a custom `WEB_UI_PORT`) with basic authentication built into the Fiber app itself.
 
 > [!IMPORTANT]
-> Настоятельно рекомендую закрывать эндпоинты файрволом и/или reverse proxy с
-> терминацией TLS перед контейнером.
-> Одной basic-аутентификации недостаточно, её можно подобрать перебором.
+> I strongly recommend protecting endpoints with a firewall and/or a TLS-terminating reverse proxy in front of the container.
+> Basic auth alone is not strong enough and can be bruteforced.
 
-По умолчанию образ собирается с пользователем `admin` и паролем `changeme`.
-Чтобы изменить это, передайте переменные окружения Docker `WEB_UI_USER` и
-`WEB_UI_PASSWORD` (пароль — SHA-256 в base64, см. таблицу выше).
+By default, docker image is built with user `admin` and password `changeme`. To change the default behavior you need to provide with docker envs `WEB_UI_USER` and `WEB_UI_PASSWORD`.
 
-# Поддержка
-
-Поддержка НЕ предоставляется, регулярные обновления не планируются.
-Найденные проблемы могут быть исправлены, если позволит свободное время.
+# Support
+The NO support provided as well as no regular updates are planned. Found issues can be fixed if free time permits.
 
 From Russia with L❤️VE
