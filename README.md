@@ -103,36 +103,45 @@ are absent from their stored parameters, and an absent flag means off.
 *   `internal/handlers.go` — REST API route handlers
 *   `internal/manager.go` — business logic: server/client lifecycle, AmneziaWG config file generation (including all AmneziaWG 3.x parameters), iptables, key generation
 *   `internal/migrations.go` — one-shot startup migrations that bring an older `web_config.json` (and the server `.conf` files it points at) up to the current schema
-*   `internal/types.go` — data models (`Server`, `Client`, `ObfuscationParams`, request/response payloads)
+*   `internal/types.go` — on-disk config plus aliases to the shared wire types in `web-ui/api`
 *   `internal/ws.go` — Socket.IO hub, periodic traffic broadcasts
 *   No reverse proxy, no supervisor: the single compiled binary (`/usr/bin/api` in the container) does everything, with [`tini`](https://github.com/krallin/tini) as PID 1 just to reap orphaned child processes
 
-**Frontend** (`web-ui/templates/index.html`, `web-ui/static/js/app.js`)
+**Fyne Frontend** (`web-ui/`, its own Go module)
 
-*   Plain HTML + vanilla JavaScript, no build step or framework — embedded into the Go binary at compile time via `go:embed`
-*   Responsive web interface with Tailwind utility classes
-*   Real-time status updates over Socket.IO
+*   A [Fyne](https://fyne.io) application compiled to WebAssembly — no JavaScript framework, no npm; `make web-ui` packages it into `web-ui/wasm`, which the `web-ui/wasm` package embeds via `go:embed` and the server imports
+*   A single dark theme, forced in the app itself; the loading page is the one `fyne package` generates, with Fyne's own dark stylesheet
+*   Real-time status and traffic updates over Socket.IO, using the Go client (`github.com/zishang520/socket.io/clients/socket/v3`) pinned to the HTTP long-polling transport, since a wasm build has no TCP stack for websockets; REST polling takes over whenever the socket is down
+*   `web-ui/api` holds every request/response and event struct. The backend imports the same package through a `replace` directive, so the two sides cannot drift apart
 *   Client-side form validation mirroring the backend's AmneziaWG 3.x parameter rules (S1-S4 ≥ 12, Jmin/Jmax bounds, etc.)
 
 ### Directory Structure
 
 ```
 .
-├── main.go                    # Entry point, Fiber app, embeds web-ui/
+├── main.go                    # Entry point, Fiber app, serves the embedded frontend
 ├── internal/
 │   ├── handlers.go            # REST API route handlers
 │   ├── manager.go             # Server/client lifecycle & AmneziaWG config generation
 │   ├── migrations.go          # One-shot startup config migrations
-│   ├── types.go               # Data models
+│   ├── types.go               # On-disk config + aliases to web-ui/api
 │   └── ws.go                  # Socket.IO hub
-├── web-ui/
-│   ├── templates/
-│   │   └── index.html         # Main web interface (embedded)
-│   └── static/
-│       ├── js/
-│       │   └── app.js         # Frontend JavaScript (embedded)
-│       └── css/
-│           └── style.css      # Custom styles (embedded)
+├── web-ui/                    # Fyne frontend, a separate Go module
+│   ├── api/types.go           # Wire types shared with the backend (via replace)
+│   ├── wasm/dist.go           # go:embed wrapper; the bundle is packaged next to it
+│   ├── main.go                # App entry: dark theme, window, lifecycle
+│   └── internal/ui/           # The application itself
+│       ├── ui.go              # Layout, polling, shared widgets
+│       ├── theme.go           # The single dark theme
+│       ├── api.go             # REST client
+│       ├── socket.go          # Socket.IO client (long-polling transport)
+│       ├── servers.go         # Server cards
+│       ├── clients.go         # Client rows and the add/edit dialog
+│       ├── forms.go           # Create-server form and validation
+│       ├── dialogs.go         # Config viewers and QR codes
+│       └── browser.go         # syscall/js helpers (downloads, origin)
+├── CLAUDE.md                   # Repository conventions for coding agents
+├── e2e/                       # Playwright browser tests (see e2e/README.md)
 ├── scripts/
 │   ├── start.sh                # Container entrypoint (exec'd by tini)
 │   ├── setup_iptables.sh
@@ -145,7 +154,9 @@ are absent from their stored parameters, and an absent flag means off.
 
 ## 🔨 Building & Running Locally
 
-Requires Go 1.26+.
+Requires Go 1.26+. The frontend bundle is built by `make web-ui` (or `make build`, which
+runs it first) — the `fyne` packaging tool is declared as a `tool` dependency of the
+`web-ui` module, so no separate install step is needed.
 
 ```bash
 make build   # go build -o server.bin . — compiles the binary, no docker

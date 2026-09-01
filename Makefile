@@ -21,6 +21,33 @@ SHELL = /usr/bin/env bash -o pipefail
 help: ## List all available commands
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
+##@ Frontend
+
+# Name of the WebAssembly bundle; the generated loader page fetches exactly
+# this file name.
+WASM_NAME = bundle
+
+# Reproducible, stripped builds. "fyne package --release" already applies the
+# same two to the wasm bundle itself, so only the server needs them spelled
+# out here.
+GO_BUILD_FLAGS = -trimpath -ldflags="-s -w"
+
+# Where "fyne package" writes its output. The go:embed wrapper lives right in
+# that directory (web-ui/wasm/dist.go), so nothing needs copying: the server
+# imports the package and gets the loader page, its light and dark
+# stylesheets, the spinners, wasm_exec.js and the bundle itself. Everything
+# there except dist.go is generated, and gitignored.
+WASM_DIR = web-ui/wasm
+
+.PHONY: web-ui
+web-ui: check-go web-ui-clean ## Build the Fyne WebAssembly frontend into web-ui/wasm/
+	cd web-ui && go tool fyne package -os wasm --name $(WASM_NAME) --release
+
+.PHONY: web-ui-clean
+web-ui-clean: ## Remove the built frontend bundle, keeping the embed wrapper
+	mkdir -p $(WASM_DIR)
+	find $(WASM_DIR) -mindepth 1 ! -name dist.go -delete
+
 ##@ Backend
 
 .PHONY: run
@@ -28,12 +55,20 @@ run: ## Build image from sources and run via docker-compose
 	docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
 
 .PHONY: build
-build: check-go ## Build the application to verify compilation
-	go build -o server.bin .
+build: web-ui ## Build the frontend bundle and the server binary that embeds it
+	go build $(GO_BUILD_FLAGS) -o server.bin .
+
+.PHONY: build-server
+build-server: check-go ## Build only the server, reusing the bundle already in web-ui/wasm
+	go build $(GO_BUILD_FLAGS) -o server.bin .
 
 .PHONY: exec
 exec: ## Execute a command inside the container
 	docker compose exec app sh
+
+.PHONY: e2e
+e2e: ## Run the Playwright browser tests against a running instance (see e2e/README.md)
+	cd e2e && npm install --no-audit --no-fund && npx playwright test
 
 ##@ Backend utilities
 
@@ -42,8 +77,9 @@ check-go: ## Check Go version
 	@go version | grep -q 'go1\.26' || (echo "Please use Go 1.26.X"; exit 1)
 
 .PHONY: vet
-vet: check-go ## Run go vet
+vet: check-go ## Run go vet over both modules
 	go vet ./...
+	cd web-ui && GOOS=js GOARCH=wasm go vet ./...
 
 .PHONY: fix
 fix: check-go ## Run go fix

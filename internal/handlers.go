@@ -15,9 +15,8 @@ import (
 
 // Handlers holds dependencies for HTTP request handlers.
 type Handlers struct {
-	mgr       *Manager
-	hub       Hub
-	indexHTML []byte
+	mgr *Manager
+	hub Hub
 }
 
 // Hub interface for handler usage (broader than HubBroadcaster).
@@ -26,13 +25,12 @@ type Hub interface {
 }
 
 // NewHandlers creates a Handlers instance.
-func NewHandlers(mgr *Manager, hub Hub, indexHTML []byte) *Handlers {
-	return &Handlers{mgr: mgr, hub: hub, indexHTML: indexHTML}
+func NewHandlers(mgr *Manager, hub Hub) *Handlers {
+	return &Handlers{mgr: mgr, hub: hub}
 }
 
 // RegisterRoutes attaches all API routes to the Fiber app.
 func (h *Handlers) RegisterRoutes(app *fiber.App) {
-	app.Get("/", h.index)
 	app.Get("/status", h.containerUptime)
 
 	api := app.Group("/api")
@@ -68,11 +66,6 @@ func (h *Handlers) RegisterRoutes(app *fiber.App) {
 	api.Get("/system/status", h.systemStatus)
 	api.Get("/system/refresh-ip", h.refreshIP)
 	api.Get("/system/iptables-test", h.iptablesTest)
-}
-
-func (h *Handlers) index(c fiber.Ctx) error {
-	c.Set(fiber.HeaderContentType, fiber.MIMETextHTMLCharsetUTF8)
-	return c.Send(h.indexHTML)
 }
 
 func (h *Handlers) containerUptime(c fiber.Ctx) error {

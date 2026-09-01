@@ -1,7 +1,6 @@
 # CHANGELOG
 
-
-## Version 1.0
+## Version 2.0
 Initial release
 
 ## Version 3.0

@@ -3,13 +3,24 @@ RUN apk add --no-cache git make gcc musl-dev linux-headers
 
 WORKDIR /build
 COPY go.mod go.sum ./
+COPY web-ui/go.mod web-ui/go.sum ./web-ui/
 RUN --mount=type=cache,id=awg_mod,target=/go/pkg/mod \
     --mount=type=cache,id=awg_build,target=/root/.cache/go-build \
-    go mod download
+    go mod download && cd web-ui && go mod download
+
 COPY . .
+
+# The frontend is a Fyne application compiled to WebAssembly. "fyne package"
+# emits the loader page, its stylesheets and the bundle straight into
+# web-ui/wasm, which is the directory the web-ui/wasm package embeds and the
+# server imports - no copying involved.
 RUN --mount=type=cache,id=awg_mod,target=/go/pkg/mod \
     --mount=type=cache,id=awg_build,target=/root/.cache/go-build \
-    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /app/api .
+    cd web-ui && go tool fyne package -os wasm --name bundle --release
+
+RUN --mount=type=cache,id=awg_mod,target=/go/pkg/mod \
+    --mount=type=cache,id=awg_build,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /app/api .
 
 # AmneziaWG upstream versions. Pinned to explicit release tags so a rebuild
 # can never silently pull a newer (or broken) master: bump these deliberately
